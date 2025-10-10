@@ -1,0 +1,386 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>LED Text Scroller (16×64)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 24px; line-height: 1.45;
+    }
+    h1 { margin: 0 0 8px; }
+    .badge { background:#eef2ff; color:#3730a3; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+    .card {
+      border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; max-width: 980px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05); background: Canvas; color: CanvasText;
+    }
+    label { display:block; font-weight:600; margin-top:12px; margin-bottom:6px; }
+    input[type="text"], input[type="number"], input[type="color"], select {
+      width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 10px; font-size: 14px;
+      background: Field; color: FieldText;
+    }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .row > div { flex: 1 1 240px; min-width: 220px; }
+    .buttons { display:flex; gap:12px; margin-top:16px; flex-wrap: wrap; }
+    button {
+      border: none; border-radius: 12px; padding: 12px 16px; cursor: pointer; font-weight: 700;
+      background: #111827; color: white; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    button.secondary { background: #374151; }
+    .hint { color: #6b7280; font-size: 13px; margin-top: 6px; }
+    .preview-wrap { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+    .preview-tools { display:flex; gap:12px; align-items:center; flex-wrap: wrap; }
+    .preview-tools label { margin: 0 6px 0 0; font-weight: 600; }
+    canvas { image-rendering: pixelated; border-radius: 10px; }
+  </style>
+</head>
+<body>
+  <h1>LED Text Scroller <span class="badge">16×64</span></h1>
+
+  <!-- Preview -->
+  <div class="card" style="margin-bottom:16px">
+    <h3 style="margin:0 0 12px">Preview (local — no data sent)</h3>
+    <div class="preview-wrap">
+      <canvas id="preview" width="64" height="16" style="background:black"></canvas>
+      <div class="preview-tools">
+        <label for="scale">Scale</label>
+        <input id="scale" type="number" min="4" max="40" value="12" style="width:90px" />
+        <label><input id="grid" type="checkbox" /> Pixel grid</label>
+        <label><input id="crisp" type="checkbox" checked /> Crisp letters</label>
+        <button id="previewPlay">Play</button>
+        <button id="previewPause" class="secondary">Pause</button>
+        <button id="previewReset" class="secondary">Reset</button>
+      </div>
+    </div>
+    <div class="hint">
+      When <b>Crisp letters</b> is on, preview uses 1-bit thresholding for sharp edges (matches the LED output when the server’s crisp mode is on).
+      Turn it off to see smooth, anti-aliased text.
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="card">
+    <label for="text">Text</label>
+    <input id="text" type="text" placeholder="Type your message..." value="Hello, world!" />
+
+    <div class="row">
+      <div>
+        <label for="fontSelect">Font (system)</label>
+        <select id="fontSelect">
+          {% for name, path in fonts %}
+          <option value="{{path}}" data-fontname="{{name}}">{{name}}</option>
+          {% endfor %}
+        </select>
+        <div class="hint">Uses macOS fonts from /System/Library/Fonts, /Library/Fonts, and ~/Library/Fonts.</div>
+      </div>
+      <div>
+        <label for="fontSize">Font size (px)</label>
+        <input id="fontSize" type="number" min="6" max="64" value="14" />
+      </div>
+      <div>
+        <label for="color">Color</label>
+        <input id="color" type="color" value="#ffffff" />
+      </div>
+      <div>
+        <label for="speed">Speed (pixels/sec)</label>
+        <input id="speed" type="number" min="1" max="200" value="40" />
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="direction">Direction</label>
+        <select id="direction">
+          <option value="left" selected>Left ←</option>
+          <option value="right">Right →</option>
+        </select>
+      </div>
+      <div>
+        <label for="layout">Layout</label>
+        <select id="layout">
+          <option value="serpentine" selected>Zig-zag (serpentine)</option>
+          <option value="progressive">Progressive (left→right each row)</option>
+        </select>
+        <div class="hint">Serpentine affects <b>sending</b> order only (wiring). Preview shows the visual frame.</div>
+      </div>
+      <div>
+        <label for="mode">Output mode</label>
+        <select id="mode">
+          <option value="simple">Simple UDP (custom, 7777)</option>
+          <option value="ddp">DDP (4048)</option>
+          <option value="wled_udp" selected>WLED UDP (Realtime, 21324)</option>
+        </select>
+      </div>
+      <div>
+        <label for="ip">Target IP</label>
+        <input id="ip" type="text" value="{{ default_ip }}" />
+      </div>
+      <div>
+        <label for="port">Port</label>
+        <input id="port" type="number" value="{{ default_ddp_port }}" />
+        <div class="hint">Auto-adjusts when you change the mode.</div>
+      </div>
+      <div>
+        <label for="ddpChannel">DDP Channel</label>
+        <input id="ddpChannel" type="number" min="1" max="255" value="1" />
+        <div class="hint">Only used in DDP mode.</div>
+      </div>
+    </div>
+
+    <div class="buttons">
+      <button id="startBtn">Start (send)</button>
+      <button id="stopBtn" class="secondary">Stop</button>
+    </div>
+  </div>
+
+  <script>
+    // ---------- constants ----------
+    const MAT_W = 64, MAT_H = 16;
+
+    // ---------- helpers ----------
+    function hexToRgb(hex){
+      const v = hex.replace("#","")
+      return [parseInt(v.slice(0,2),16), parseInt(v.slice(2,4),16), parseInt(v.slice(4,6),16)]
+    }
+
+    function updatePortHelper(){
+      const modeSel = document.getElementById("mode")
+      const portInput = document.getElementById("port")
+      const mode = modeSel.value
+      if(mode === "simple" && (!portInput.value || ["4048","21324"].includes(portInput.value))) {
+        portInput.value = "7777"
+      }
+      if(mode === "ddp" && (!portInput.value || ["7777","21324"].includes(portInput.value))) {
+        portInput.value = "{{ default_ddp_port }}"
+      }
+      if(mode === "wled_udp" && (!portInput.value || ["7777","4048"].includes(portInput.value))) {
+        portInput.value = "21324"
+      }
+    }
+    document.getElementById("mode").addEventListener("change", updatePortHelper)
+
+    // ---------- preview engine ----------
+    const cvs = document.getElementById("preview")
+    const ctx = cvs.getContext("2d", { alpha: false })
+    ctx.imageSmoothingEnabled = false
+
+    const scaleInput = document.getElementById("scale")
+    const gridInput = document.getElementById("grid")
+    const crispInput = document.getElementById("crisp")
+    const previewPlayBtn = document.getElementById("previewPlay")
+    const previewPauseBtn = document.getElementById("previewPause")
+    const previewResetBtn = document.getElementById("previewReset")
+
+    let animReq = null
+    let shift = 0
+    let maxShift = 0
+    let lastTs = 0
+
+    function currentFontCSS(){
+      const sel = document.getElementById("fontSelect")
+      const opt = sel.options[sel.selectedIndex]
+      const name = opt ? (opt.getAttribute("data-fontname") || "sans-serif") : "sans-serif"
+      const size = parseInt(document.getElementById("fontSize").value,10) || 14
+      return `${size}px "${name}", sans-serif`
+    }
+
+    function measureTextWidth(text, fontCSS){
+      ctx.save()
+      ctx.font = fontCSS
+      const w = ctx.measureText(text).width
+      ctx.restore()
+      return Math.max(0, Math.floor(w))
+    }
+
+    function applyScale(){
+      const s = Math.max(4, Math.min(40, parseInt(scaleInput.value,10)||12))
+      cvs.style.width = (MAT_W * s) + "px"
+      cvs.style.height = (MAT_H * s) + "px"
+    }
+
+    function drawGrid(){
+      ctx.save()
+      ctx.strokeStyle = "rgba(255,255,255,0.08)"
+      ctx.lineWidth = 1
+      for(let x=1; x<MAT_W; x++){
+        ctx.beginPath(); ctx.moveTo(x+0.5, 0); ctx.lineTo(x+0.5, MAT_H); ctx.stroke()
+      }
+      for(let y=1; y<MAT_H; y++){
+        ctx.beginPath(); ctx.moveTo(0, y+0.5); ctx.lineTo(MAT_W, y+0.5); ctx.stroke()
+      }
+      ctx.restore()
+    }
+
+    // Threshold + recolor to produce crisp 1-bit edges
+    function thresholdAndRecolor(ctx, w, h, hexColor){
+      const [rC,gC,bC] = hexToRgb(hexColor)
+      const img = ctx.getImageData(0,0,w,h)
+      const d = img.data
+      for(let i=0;i<d.length;i+=4){
+        const lum = (d[i]*0.2126 + d[i+1]*0.7152 + d[i+2]*0.0722)
+        if(lum >= 128){
+          d[i]   = rC
+          d[i+1] = gC
+          d[i+2] = bC
+          d[i+3] = 255
+        }else{
+          d[i]   = 0
+          d[i+1] = 0
+          d[i+2] = 0
+          d[i+3] = 255
+        }
+      }
+      ctx.putImageData(img,0,0)
+    }
+
+    function recalcPreview(){
+      shift = 0
+      lastTs = 0
+      const text = document.getElementById("text").value
+      const fontCSS = currentFontCSS()
+      const textW = measureTextWidth(text, fontCSS)
+      maxShift = MAT_W + textW
+      applyScale()
+      drawFrame(0)
+    }
+
+    function drawFrame(shiftPx){
+      ctx.save()
+      ctx.imageSmoothingEnabled = false
+      ctx.fillStyle = "black"
+      ctx.fillRect(0,0,MAT_W,MAT_H)
+
+      const text = document.getElementById("text").value
+      const color = document.getElementById("color").value
+      const dir = document.getElementById("direction").value
+      const fontCSS = currentFontCSS()
+      const size = parseInt(document.getElementById("fontSize").value,10) || 14
+      const y = Math.floor((MAT_H - size) / 2)
+      const sPx = Math.floor(shiftPx)
+
+      ctx.font = fontCSS
+      ctx.textBaseline = "top"
+
+      if (crispInput.checked) {
+        // draw in white, then threshold to the chosen color (hard edges)
+        ctx.fillStyle = "#ffffff"
+        if(dir === "left"){
+          ctx.save()
+          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+          ctx.translate(-sPx, 0)
+          ctx.fillText(text, MAT_W, y)
+          ctx.restore()
+        } else {
+          const textW = measureTextWidth(text, fontCSS)
+          const canvasW = Math.max(MAT_W, textW + MAT_W)
+          ctx.save()
+          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+          ctx.translate(canvasW - MAT_W - sPx, 0)
+          ctx.fillText(text, 0, y)
+          ctx.restore()
+        }
+        thresholdAndRecolor(ctx, MAT_W, MAT_H, color)
+      } else {
+        // draw directly with anti-aliasing
+        ctx.fillStyle = color
+        if(dir === "left"){
+          ctx.save()
+          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+          ctx.translate(-sPx, 0)
+          ctx.fillText(text, MAT_W, y)
+          ctx.restore()
+        } else {
+          const textW = measureTextWidth(text, fontCSS)
+          const canvasW = Math.max(MAT_W, textW + MAT_W)
+          ctx.save()
+          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+          ctx.translate(canvasW - MAT_W - sPx, 0)
+          ctx.fillText(text, 0, y)
+          ctx.restore()
+        }
+      }
+
+      if(gridInput.checked) drawGrid()
+      ctx.restore()
+    }
+
+    function animatePreview(ts){
+      if(!lastTs) lastTs = ts
+      const dt = (ts - lastTs) / 1000.0
+      lastTs = ts
+
+      const speed = Math.max(1, parseFloat(document.getElementById("speed").value)||40)
+      shift += speed * dt
+      if(shift >= maxShift) shift = 0
+
+      drawFrame(shift)
+      animReq = requestAnimationFrame(animatePreview)
+    }
+
+    // preview controls
+    previewPlayBtn.addEventListener("click", () => {
+      if(animReq) return
+      recalcPreview()
+      animReq = requestAnimationFrame(animatePreview)
+    })
+    previewPauseBtn.addEventListener("click", () => {
+      if(animReq){ cancelAnimationFrame(animReq); animReq = null }
+    })
+    previewResetBtn.addEventListener("click", () => {
+      if(animReq){ cancelAnimationFrame(animReq); animReq = null }
+      recalcPreview()
+    })
+
+    // re-render preview on key parameter changes when paused
+    ;["text","fontSelect","fontSize","color","speed","direction","crisp"].forEach(id => {
+      document.getElementById(id).addEventListener("input", () => { if(!animReq) recalcPreview() })
+      document.getElementById(id).addEventListener("change", () => { if(!animReq) recalcPreview() })
+    })
+    scaleInput.addEventListener("change", () => { applyScale(); if(!animReq) drawFrame(shift) })
+    gridInput.addEventListener("change", () => { if(!animReq) drawFrame(shift) })
+
+    // ---------- send controls ----------
+    document.getElementById("startBtn").addEventListener("click", async () => {
+      // optional: start preview alongside sending
+      if(!animReq){ recalcPreview(); animReq = requestAnimationFrame(animatePreview) }
+
+      const body = {
+        text: document.getElementById("text").value,
+        font_path: document.getElementById("fontSelect").value,
+        font_size: parseInt(document.getElementById("fontSize").value, 10),
+        color: hexToRgb(document.getElementById("color").value),
+        speed: parseFloat(document.getElementById("speed").value),
+        direction: document.getElementById("direction").value,
+        serpentine: document.getElementById("layout").value === "serpentine",
+        mode: document.getElementById("mode").value,
+        ip: document.getElementById("ip").value,
+        port: parseInt(document.getElementById("port").value, 10),
+        ddp_channel: parseInt(document.getElementById("ddpChannel").value, 10),
+        crisp: !!document.getElementById("crisp").checked
+      }
+
+      try {
+        const r = await fetch("/start", {
+          method:"POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(body)
+        })
+        const j = await r.json()
+        if(!j.ok){ alert(j.error || "Failed to start"); }
+      } catch (e){
+        alert("Failed to reach server: " + e)
+      }
+    })
+
+    document.getElementById("stopBtn").addEventListener("click", async () => {
+      try { await fetch("/stop", {method:"POST"}) } catch(e){}
+    })
+
+    // ---------- init ----------
+    updatePortHelper()
+    recalcPreview()
+  </script>
+</body>
+</html>

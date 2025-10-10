@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+venv/
+.env.*
+# macOS
+.DS_Store
+# Editor
+.vscode/
+.idea/
+# PyInstaller / build artifacts (if you try packaging)
+build/
+dist/
+*.spec
