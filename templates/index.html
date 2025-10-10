@@ -54,13 +54,16 @@
         <button id="previewReset" class="secondary">Reset</button>
       </div>
     </div>
-    <div class="hint">Crisp = hard 1-bit edges (matches LED “crisp” mode). Static display is centered.</div>
+    <div class="hint">
+      When <b>Crisp letters</b> is on, preview uses 1-bit thresholding for sharp edges (matches the LED output when the server’s crisp mode is on).
+      Turn it off to see smooth, anti-aliased text.
+    </div>
   </div>
 
   <!-- Controls -->
   <div class="card">
     <label for="text">Text</label>
-    <input id="text" type="text" placeholder="Type your message..." value="Hello, world! 👋" />
+    <input id="text" type="text" placeholder="Type your message..." value="Hello, world!" />
 
     <div class="row">
       <div>
@@ -94,13 +97,6 @@
 
     <div class="row">
       <div>
-        <label for="displayMode">Display</label>
-        <select id="displayMode">
-          <option value="scroll">Scroll</option>
-          <option value="static" selected>Static (no scroll)</option>
-        </select>
-      </div>
-      <div>
         <label for="direction">Direction</label>
         <select id="direction">
           <option value="left" selected>Left ←</option>
@@ -110,26 +106,26 @@
       <div>
         <label for="layout">Layout</label>
         <select id="layout">
-          <option value="serpentine">Zig-zag (serpentine)</option>
-          <option value="progressive" selected>Progressive (left→right each row)</option>
+          <option value="serpentine" >Zig-zag (serpentine)</option>
+          <option value="progressive" selected >Progressive (left→right each row)</option>
         </select>
-        <div class="hint">Layout affects <b>sending</b> order only (wiring). Preview shows the visual frame.</div>
+        <div class="hint">Serpentine affects <b>sending</b> order only (wiring). Preview shows the visual frame.</div>
       </div>
       <div>
         <label for="mode">Output mode</label>
         <select id="mode">
           <option value="simple">Simple UDP (custom, 7777)</option>
           <option value="ddp" selected>DDP (4048)</option>
-          <option value="wled_udp">WLED UDP (Realtime, 21324)</option>
+          <option value="wled_udp" >WLED UDP (Realtime, 21324)</option>
         </select>
       </div>
       <div>
         <label for="ip">Target IP</label>
-        <input id="ip" type="text" value="{{ default_ip or '192.168.1.181' }}" />
+        <input id="ip" type="text" value="{{ default_ip }}" />
       </div>
       <div>
         <label for="port">Port</label>
-        <input id="port" type="number" value="{{ default_ddp_port or 4048 }}" />
+        <input id="port" type="number" value="{{ default_ddp_port }}" />
         <div class="hint">Auto-adjusts when you change the mode.</div>
       </div>
       <div>
@@ -163,22 +159,13 @@
         portInput.value = "7777"
       }
       if(mode === "ddp" && (!portInput.value || ["7777","21324"].includes(portInput.value))) {
-        portInput.value = "{{ default_ddp_port or 4048 }}"
+        portInput.value = "{{ default_ddp_port }}"
       }
       if(mode === "wled_udp" && (!portInput.value || ["7777","4048"].includes(portInput.value))) {
         portInput.value = "21324"
       }
     }
     document.getElementById("mode").addEventListener("change", updatePortHelper)
-
-    function updateDisplayModeUI(){
-      const disp = document.getElementById("displayMode").value
-      const speed = document.getElementById("speed")
-      const direction = document.getElementById("direction")
-      const isStatic = (disp === "static")
-      speed.disabled = isStatic
-      direction.disabled = isStatic
-    }
 
     // ---------- preview engine ----------
     const cvs = document.getElementById("preview")
@@ -201,8 +188,8 @@
       const sel = document.getElementById("fontSelect")
       const opt = sel.options[sel.selectedIndex]
       const name = opt ? (opt.getAttribute("data-fontname") || "sans-serif") : "sans-serif"
-      const size = parseInt(document.getElementById("fontSize").value,10) || 16
-      // include emoji fallbacks
+      const size = parseInt(document.getElementById("fontSize").value,10) || 14
+      // include emoji fallback faces so canvas can render them
       return `${size}px "${name}", "Apple Color Emoji", "Segoe UI Emoji", emoji, sans-serif`
     }
 
@@ -261,8 +248,7 @@
       const text = document.getElementById("text").value
       const fontCSS = currentFontCSS()
       const textW = measureTextWidth(text, fontCSS)
-      const disp = document.getElementById("displayMode").value
-      maxShift = (disp === "static") ? 0 : (MAT_W + textW)
+      maxShift = MAT_W + textW
       applyScale()
       drawFrame(0)
     }
@@ -276,61 +262,55 @@
       const text = document.getElementById("text").value
       const color = document.getElementById("color").value
       const dir = document.getElementById("direction").value
-      const disp = document.getElementById("displayMode").value
       const fontCSS = currentFontCSS()
-      const size = parseInt(document.getElementById("fontSize").value,10) || 16
+      const size = parseInt(document.getElementById("fontSize").value,10) || 14
+      const y = Math.floor((MAT_H - size) / 2)
+      const sPx = Math.floor(shiftPx)
 
-      // Precise vertical centering using canvas metrics
-      ctx.font = fontCSS
-      ctx.textBaseline = "alphabetic"
-      const metrics = ctx.measureText(text)
-      const ascent  = metrics.actualBoundingBoxAscent || (size * 0.8)
-      const descent = metrics.actualBoundingBoxDescent || (size * 0.2)
-      const textH   = Math.ceil(ascent + descent)
-      const baselineY = Math.floor((MAT_H - textH) / 2 + ascent)
-      const textW = measureTextWidth(text, fontCSS)
+     ctx.font = fontCSS
+     ctx.textBaseline = "alphabetic"   // IMPORTANT
+     const metrics = ctx.measureText(text)
+     const ascent  = metrics.actualBoundingBoxAscent || (size * 0.8)
+     const descent = metrics.actualBoundingBoxDescent || (size * 0.2)
+     const textH   = Math.ceil(ascent + descent)
+     const baselineY = Math.floor((MAT_H - textH) / 2 + ascent)
 
-      if (disp === "static") {
-        const x = Math.floor((MAT_W - textW)/2)
-        if (document.getElementById("crisp").checked) {
-          ctx.fillStyle = "#ffffff"
-          ctx.fillText(text, x, baselineY)
-          thresholdAndRecolor(ctx, MAT_W, MAT_H, color)
+      if (crispInput.checked) {
+        // draw in white, then threshold to the chosen color (hard edges)
+        ctx.fillStyle = "#ffffff"
+        if(dir === "left"){
+          ctx.save()
+          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+          ctx.translate(-sPx, 0)
+          ctx.fillText(text, MAT_W, baselineY)
+          ctx.restore()
         } else {
-          ctx.fillStyle = color
-          ctx.fillText(text, x, baselineY)
+          const textW = measureTextWidth(text, fontCSS)
+          const canvasW = Math.max(MAT_W, textW + MAT_W)
+          ctx.save()
+          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+          ctx.translate(canvasW - MAT_W - sPx, 0)
+          ctx.fillText(text, 0, baselineY)
+          ctx.restore()
         }
+        thresholdAndRecolor(ctx, MAT_W, MAT_H, color)
       } else {
-        const sPx = Math.floor(shiftPx)
-        if (document.getElementById("crisp").checked) {
-          ctx.fillStyle = "#ffffff"
-          if(dir === "left"){
-            ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-            ctx.translate(-sPx,0)
-            ctx.fillText(text, MAT_W, baselineY)
-            ctx.restore()
-          } else {
-            const canvasW = Math.max(MAT_W, textW + MAT_W)
-            ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-            ctx.translate(canvasW - MAT_W - sPx, 0)
-            ctx.fillText(text, 0, baselineY)
-            ctx.restore()
-          }
-          thresholdAndRecolor(ctx, MAT_W, MAT_H, color)
+        // draw directly with anti-aliasing
+        ctx.fillStyle = color
+        if(dir === "left"){
+          ctx.save()
+          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+          ctx.translate(-sPx, 0)
+          ctx.fillText(text, MAT_W, baselineY)
+          ctx.restore()
         } else {
-          ctx.fillStyle = color
-          if(dir === "left"){
-            ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-            ctx.translate(-sPx,0)
-            ctx.fillText(text, MAT_W, baselineY)
-            ctx.restore()
-          } else {
-            const canvasW = Math.max(MAT_W, textW + MAT_W)
-            ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-            ctx.translate(canvasW - MAT_W - sPx, 0)
-            ctx.fillText(text, 0, baselineY)
-            ctx.restore()
-          }
+          const textW = measureTextWidth(text, fontCSS)
+          const canvasW = Math.max(MAT_W, textW + MAT_W)
+          ctx.save()
+          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+          ctx.translate(canvasW - MAT_W - sPx, 0)
+          ctx.fillText(text, 0, baselineY)
+          ctx.restore()
         }
       }
 
@@ -339,14 +319,6 @@
     }
 
     function animatePreview(ts){
-      const disp = document.getElementById("displayMode").value
-      if (disp === "static") {
-        // No scrolling; just keep drawing
-        drawFrame(0)
-        animReq = requestAnimationFrame(animatePreview)
-        return
-      }
-
       if(!lastTs) lastTs = ts
       const dt = (ts - lastTs) / 1000.0
       lastTs = ts
@@ -374,16 +346,16 @@
     })
 
     // re-render preview on key parameter changes when paused
-    ;["text","fontSelect","fontSize","color","speed","direction","crisp","displayMode"].forEach(id => {
+    ;["text","fontSelect","fontSize","color","speed","direction","crisp"].forEach(id => {
       document.getElementById(id).addEventListener("input", () => { if(!animReq) recalcPreview() })
       document.getElementById(id).addEventListener("change", () => { if(!animReq) recalcPreview() })
     })
-    scaleInput.addEventListener("change", () => { applyScale(); if(!animReq) drawFrame(0) })
-    gridInput.addEventListener("change", () => { if(!animReq) drawFrame(0) })
+    scaleInput.addEventListener("change", () => { applyScale(); if(!animReq) drawFrame(shift) })
+    gridInput.addEventListener("change", () => { if(!animReq) drawFrame(shift) })
 
     // ---------- send controls ----------
     document.getElementById("startBtn").addEventListener("click", async () => {
-      // Start preview alongside sending
+      // optional: start preview alongside sending
       if(!animReq){ recalcPreview(); animReq = requestAnimationFrame(animatePreview) }
 
       const body = {
@@ -398,8 +370,7 @@
         ip: document.getElementById("ip").value,
         port: parseInt(document.getElementById("port").value, 10),
         ddp_channel: parseInt(document.getElementById("ddpChannel").value, 10),
-        crisp: !!document.getElementById("crisp").checked,
-        display_mode: document.getElementById("displayMode").value
+        crisp: !!document.getElementById("crisp").checked
       }
 
       try {
@@ -421,10 +392,12 @@
 
     // ---------- init ----------
     updatePortHelper()
-    updateDisplayModeUI()
+    recalcPreview()
+  </script>
 
-    // Ensure Arial Unicode is selected by default if present and nothing else was selected
-    ;(function ensureArialUnicodeDefault(){
+  <script>
+    // If no option is selected (edge case), try to pick “Arial Unicode”
+    (function ensureArialUnicodeDefault(){
       const sel = document.getElementById("fontSelect");
       if (!sel) return;
       const hasSelected = Array.from(sel.options).some(o => o.selected);
@@ -432,10 +405,11 @@
       const target = Array.from(sel.options).find(
         o => (o.getAttribute("data-fontname") || "").toLowerCase().includes("arial unicode")
       );
-      if (target) target.selected = true;
+      if (target) {
+        target.selected = true;
+      }
     })();
-
-    recalcPreview()
   </script>
+
 </body>
 </html>
