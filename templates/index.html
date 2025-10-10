@@ -49,21 +49,19 @@
         <input id="scale" type="number" min="4" max="40" value="12" style="width:90px" />
         <label><input id="grid" type="checkbox" /> Pixel grid</label>
         <label><input id="crisp" type="checkbox" checked /> Crisp letters</label>
+        <label><input id="centerShort" type="checkbox" /> Center when short (scroll)</label>
         <button id="previewPlay">Play</button>
         <button id="previewPause" class="secondary">Pause</button>
         <button id="previewReset" class="secondary">Reset</button>
       </div>
     </div>
-    <div class="hint">
-      When <b>Crisp letters</b> is on, preview uses 1-bit thresholding for sharp edges (matches the LED output when the server’s crisp mode is on).
-      Turn it off to see smooth, anti-aliased text.
-    </div>
+    <div class="hint">Crisp = hard 1-bit edges (matches LED “crisp” mode). Static display is centered. “Center when short” only affects Scroll mode.</div>
   </div>
 
   <!-- Controls -->
   <div class="card">
     <label for="text">Text</label>
-    <input id="text" type="text" placeholder="Type your message..." value="Hello, world!" />
+    <input id="text" type="text" placeholder="Type your message..." value="Hello, world! 👋" />
 
     <div class="row">
       <div>
@@ -97,6 +95,13 @@
 
     <div class="row">
       <div>
+        <label for="displayMode">Display</label>
+        <select id="displayMode">
+          <option value="scroll" selected>Scroll</option>
+          <option value="static">Static (no scroll)</option>
+        </select>
+      </div>
+      <div>
         <label for="direction">Direction</label>
         <select id="direction">
           <option value="left" selected>Left ←</option>
@@ -106,26 +111,26 @@
       <div>
         <label for="layout">Layout</label>
         <select id="layout">
-          <option value="serpentine" >Zig-zag (serpentine)</option>
-          <option value="progressive" selected >Progressive (left→right each row)</option>
+          <option value="serpentine">Zig-zag (serpentine)</option>
+          <option value="progressive" selected>Progressive (left→right each row)</option>
         </select>
-        <div class="hint">Serpentine affects <b>sending</b> order only (wiring). Preview shows the visual frame.</div>
+        <div class="hint">Layout affects <b>sending</b> order only (wiring). Preview shows the visual frame.</div>
       </div>
       <div>
         <label for="mode">Output mode</label>
         <select id="mode">
           <option value="simple">Simple UDP (custom, 7777)</option>
           <option value="ddp" selected>DDP (4048)</option>
-          <option value="wled_udp" >WLED UDP (Realtime, 21324)</option>
+          <option value="wled_udp">WLED UDP (Realtime, 21324)</option>
         </select>
       </div>
       <div>
         <label for="ip">Target IP</label>
-        <input id="ip" type="text" value="{{ default_ip }}" />
+        <input id="ip" type="text" value="{{ default_ip or '192.168.1.181' }}" />
       </div>
       <div>
         <label for="port">Port</label>
-        <input id="port" type="number" value="{{ default_ddp_port }}" />
+        <input id="port" type="number" value="{{ default_ddp_port or 4048 }}" />
         <div class="hint">Auto-adjusts when you change the mode.</div>
       </div>
       <div>
@@ -159,13 +164,22 @@
         portInput.value = "7777"
       }
       if(mode === "ddp" && (!portInput.value || ["7777","21324"].includes(portInput.value))) {
-        portInput.value = "{{ default_ddp_port }}"
+        portInput.value = "{{ default_ddp_port or 4048 }}"
       }
       if(mode === "wled_udp" && (!portInput.value || ["7777","4048"].includes(portInput.value))) {
         portInput.value = "21324"
       }
     }
     document.getElementById("mode").addEventListener("change", updatePortHelper)
+
+    function updateDisplayModeUI(){
+      const disp = document.getElementById("displayMode").value
+      const speed = document.getElementById("speed")
+      const direction = document.getElementById("direction")
+      const isStatic = (disp === "static")
+      speed.disabled = isStatic
+      direction.disabled = isStatic
+    }
 
     // ---------- preview engine ----------
     const cvs = document.getElementById("preview")
@@ -175,6 +189,7 @@
     const scaleInput = document.getElementById("scale")
     const gridInput = document.getElementById("grid")
     const crispInput = document.getElementById("crisp")
+    const centerShortInput = document.getElementById("centerShort")
     const previewPlayBtn = document.getElementById("previewPlay")
     const previewPauseBtn = document.getElementById("previewPause")
     const previewResetBtn = document.getElementById("previewReset")
@@ -188,8 +203,7 @@
       const sel = document.getElementById("fontSelect")
       const opt = sel.options[sel.selectedIndex]
       const name = opt ? (opt.getAttribute("data-fontname") || "sans-serif") : "sans-serif"
-      const size = parseInt(document.getElementById("fontSize").value,10) || 14
-      // include emoji fallback faces so canvas can render them
+      const size = parseInt(document.getElementById("fontSize").value,10) || 16
       return `${size}px "${name}", "Apple Color Emoji", "Segoe UI Emoji", emoji, sans-serif`
     }
 
@@ -220,7 +234,6 @@
       ctx.restore()
     }
 
-    // Threshold + recolor to produce crisp 1-bit edges
     function thresholdAndRecolor(ctx, w, h, hexColor){
       const [rC,gC,bC] = hexToRgb(hexColor)
       const img = ctx.getImageData(0,0,w,h)
@@ -248,7 +261,8 @@
       const text = document.getElementById("text").value
       const fontCSS = currentFontCSS()
       const textW = measureTextWidth(text, fontCSS)
-      maxShift = MAT_W + textW
+      const disp = document.getElementById("displayMode").value
+      maxShift = (disp === "static") ? 0 : (MAT_W + textW)
       applyScale()
       drawFrame(0)
     }
@@ -262,55 +276,80 @@
       const text = document.getElementById("text").value
       const color = document.getElementById("color").value
       const dir = document.getElementById("direction").value
+      const disp = document.getElementById("displayMode").value
       const fontCSS = currentFontCSS()
-      const size = parseInt(document.getElementById("fontSize").value,10) || 14
-      const y = Math.floor((MAT_H - size) / 2)
-      const sPx = Math.floor(shiftPx)
+      const size = parseInt(document.getElementById("fontSize").value,10) || 16
 
-     ctx.font = fontCSS
-     ctx.textBaseline = "alphabetic"   // IMPORTANT
-     const metrics = ctx.measureText(text)
-     const ascent  = metrics.actualBoundingBoxAscent || (size * 0.8)
-     const descent = metrics.actualBoundingBoxDescent || (size * 0.2)
-     const textH   = Math.ceil(ascent + descent)
-     const baselineY = Math.floor((MAT_H - textH) / 2 + ascent)
+      ctx.font = fontCSS
+      ctx.textBaseline = "alphabetic"
+      const metrics = ctx.measureText(text)
+      const ascent  = metrics.actualBoundingBoxAscent || (size * 0.8)
+      const descent = metrics.actualBoundingBoxDescent || (size * 0.2)
+      const textH   = Math.ceil(ascent + descent)
+      const baselineY = Math.floor((MAT_H - textH) / 2 + ascent)
+      const textW = measureTextWidth(text, fontCSS)
+      const centerX = Math.floor((MAT_W - textW)/2)
 
-      if (crispInput.checked) {
-        // draw in white, then threshold to the chosen color (hard edges)
-        ctx.fillStyle = "#ffffff"
-        if(dir === "left"){
-          ctx.save()
-          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-          ctx.translate(-sPx, 0)
-          ctx.fillText(text, MAT_W, baselineY)
-          ctx.restore()
+      if (disp === "static") {
+        const x = centerX
+        if (document.getElementById("crisp").checked) {
+          ctx.fillStyle = "#ffffff"
+          ctx.fillText(text, x, baselineY)
+          thresholdAndRecolor(ctx, MAT_W, MAT_H, color)
         } else {
-          const textW = measureTextWidth(text, fontCSS)
-          const canvasW = Math.max(MAT_W, textW + MAT_W)
-          ctx.save()
-          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-          ctx.translate(canvasW - MAT_W - sPx, 0)
-          ctx.fillText(text, 0, baselineY)
-          ctx.restore()
+          ctx.fillStyle = color
+          ctx.fillText(text, x, baselineY)
         }
-        thresholdAndRecolor(ctx, MAT_W, MAT_H, color)
       } else {
-        // draw directly with anti-aliasing
-        ctx.fillStyle = color
-        if(dir === "left"){
-          ctx.save()
-          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-          ctx.translate(-sPx, 0)
-          ctx.fillText(text, MAT_W, baselineY)
-          ctx.restore()
+        // SCROLL MODE
+        const sPx = Math.floor(shiftPx)
+        const useCenterShort = !!centerShortInput.checked && (textW < MAT_W)
+
+        if (document.getElementById("crisp").checked) {
+          ctx.fillStyle = "#ffffff"
+          if(useCenterShort){
+            // Draw centered, translate to create slide-out
+            ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+            ctx.translate((dir === "left" ? -sPx : sPx), 0)
+            ctx.fillText(text, centerX, baselineY)
+            ctx.restore()
+          } else {
+            // Original off-edge scroll
+            if(dir === "left"){
+              ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+              ctx.translate(-sPx,0)
+              ctx.fillText(text, MAT_W, baselineY)
+              ctx.restore()
+            } else {
+              const canvasW = Math.max(MAT_W, textW + MAT_W)
+              ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+              ctx.translate(canvasW - MAT_W - sPx, 0)
+              ctx.fillText(text, 0, baselineY)
+              ctx.restore()
+            }
+          }
+          thresholdAndRecolor(ctx, MAT_W, MAT_H, color)
         } else {
-          const textW = measureTextWidth(text, fontCSS)
-          const canvasW = Math.max(MAT_W, textW + MAT_W)
-          ctx.save()
-          ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-          ctx.translate(canvasW - MAT_W - sPx, 0)
-          ctx.fillText(text, 0, baselineY)
-          ctx.restore()
+          ctx.fillStyle = color
+          if(useCenterShort){
+            ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+            ctx.translate((dir === "left" ? -sPx : sPx), 0)
+            ctx.fillText(text, centerX, baselineY)
+            ctx.restore()
+          } else {
+            if(dir === "left"){
+              ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+              ctx.translate(-sPx,0)
+              ctx.fillText(text, MAT_W, baselineY)
+              ctx.restore()
+            } else {
+              const canvasW = Math.max(MAT_W, textW + MAT_W)
+              ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+              ctx.translate(canvasW - MAT_W - sPx, 0)
+              ctx.fillText(text, 0, baselineY)
+              ctx.restore()
+            }
+          }
         }
       }
 
@@ -319,6 +358,13 @@
     }
 
     function animatePreview(ts){
+      const disp = document.getElementById("displayMode").value
+      if (disp === "static") {
+        drawFrame(0)
+        animReq = requestAnimationFrame(animatePreview)
+        return
+      }
+
       if(!lastTs) lastTs = ts
       const dt = (ts - lastTs) / 1000.0
       lastTs = ts
@@ -332,30 +378,42 @@
     }
 
     // preview controls
-    previewPlayBtn.addEventListener("click", () => {
+    document.getElementById("previewPlay").addEventListener("click", () => {
       if(animReq) return
       recalcPreview()
       animReq = requestAnimationFrame(animatePreview)
     })
-    previewPauseBtn.addEventListener("click", () => {
+    document.getElementById("previewPause").addEventListener("click", () => {
       if(animReq){ cancelAnimationFrame(animReq); animReq = null }
     })
-    previewResetBtn.addEventListener("click", () => {
+    document.getElementById("previewReset").addEventListener("click", () => {
       if(animReq){ cancelAnimationFrame(animReq); animReq = null }
       recalcPreview()
     })
 
-    // re-render preview on key parameter changes when paused
-    ;["text","fontSelect","fontSize","color","speed","direction","crisp"].forEach(id => {
+    // Re-render preview when paused
+    ;["text","fontSelect","fontSize","color","speed","direction","crisp","displayMode","centerShort"].forEach(id => {
       document.getElementById(id).addEventListener("input", () => { if(!animReq) recalcPreview() })
       document.getElementById(id).addEventListener("change", () => { if(!animReq) recalcPreview() })
     })
-    scaleInput.addEventListener("change", () => { applyScale(); if(!animReq) drawFrame(shift) })
-    gridInput.addEventListener("change", () => { if(!animReq) drawFrame(shift) })
+    scaleInput.addEventListener("change", () => { applyScale(); if(!animReq) drawFrame(0) })
+    gridInput.addEventListener("change", () => { if(!animReq) drawFrame(0) })
+
+    // Smart UX: if user changes speed/direction while static, switch to scroll
+    function nudgeToScrollIfStatic() {
+      const sel = document.getElementById("displayMode");
+      if (sel.value === "static") {
+        sel.value = "scroll";
+        updateDisplayModeUI();
+        if (!animReq) recalcPreview();
+      }
+    }
+    document.getElementById("speed").addEventListener("input", nudgeToScrollIfStatic);
+    document.getElementById("speed").addEventListener("change", nudgeToScrollIfStatic);
+    document.getElementById("direction").addEventListener("change", nudgeToScrollIfStatic);
 
     // ---------- send controls ----------
     document.getElementById("startBtn").addEventListener("click", async () => {
-      // optional: start preview alongside sending
       if(!animReq){ recalcPreview(); animReq = requestAnimationFrame(animatePreview) }
 
       const body = {
@@ -370,7 +428,9 @@
         ip: document.getElementById("ip").value,
         port: parseInt(document.getElementById("port").value, 10),
         ddp_channel: parseInt(document.getElementById("ddpChannel").value, 10),
-        crisp: !!document.getElementById("crisp").checked
+        crisp: !!document.getElementById("crisp").checked,
+        display_mode: document.getElementById("displayMode").value,
+        center_short: !!document.getElementById("centerShort").checked
       }
 
       try {
@@ -392,12 +452,10 @@
 
     // ---------- init ----------
     updatePortHelper()
-    recalcPreview()
-  </script>
+    updateDisplayModeUI()
 
-  <script>
-    // If no option is selected (edge case), try to pick “Arial Unicode”
-    (function ensureArialUnicodeDefault(){
+    // If nothing preselected, prefer Arial Unicode
+    ;(function ensureArialUnicodeDefault(){
       const sel = document.getElementById("fontSelect");
       if (!sel) return;
       const hasSelected = Array.from(sel.options).some(o => o.selected);
@@ -405,11 +463,10 @@
       const target = Array.from(sel.options).find(
         o => (o.getAttribute("data-fontname") || "").toLowerCase().includes("arial unicode")
       );
-      if (target) {
-        target.selected = true;
-      }
+      if (target) target.selected = true;
     })();
-  </script>
 
+    recalcPreview()
+  </script>
 </body>
 </html>
