@@ -7,7 +7,7 @@
   <style>
     :root { color-scheme: light dark; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
       margin: 24px; line-height: 1.45;
     }
     h1 { margin: 0 0 8px; }
@@ -70,14 +70,20 @@
         <label for="fontSelect">Font (system)</label>
         <select id="fontSelect">
           {% for name, path in fonts %}
-          <option value="{{path}}" data-fontname="{{name}}">{{name}}</option>
+          <option
+            value="{{path}}"
+            data-fontname="{{name}}"
+            {% if "Arial Unicode" in name %}selected{% endif %}
+          >
+            {{name}}
+          </option>
           {% endfor %}
         </select>
         <div class="hint">Uses macOS fonts from /System/Library/Fonts, /Library/Fonts, and ~/Library/Fonts.</div>
       </div>
       <div>
         <label for="fontSize">Font size (px)</label>
-        <input id="fontSize" type="number" min="6" max="64" value="14" />
+        <input id="fontSize" type="number" min="6" max="64" value="16" />
       </div>
       <div>
         <label for="color">Color</label>
@@ -100,8 +106,8 @@
       <div>
         <label for="layout">Layout</label>
         <select id="layout">
-          <option value="serpentine" selected>Zig-zag (serpentine)</option>
-          <option value="progressive">Progressive (left→right each row)</option>
+          <option value="serpentine" >Zig-zag (serpentine)</option>
+          <option value="progressive" selected >Progressive (left→right each row)</option>
         </select>
         <div class="hint">Serpentine affects <b>sending</b> order only (wiring). Preview shows the visual frame.</div>
       </div>
@@ -109,8 +115,8 @@
         <label for="mode">Output mode</label>
         <select id="mode">
           <option value="simple">Simple UDP (custom, 7777)</option>
-          <option value="ddp">DDP (4048)</option>
-          <option value="wled_udp" selected>WLED UDP (Realtime, 21324)</option>
+          <option value="ddp" selected>DDP (4048)</option>
+          <option value="wled_udp" >WLED UDP (Realtime, 21324)</option>
         </select>
       </div>
       <div>
@@ -183,7 +189,8 @@
       const opt = sel.options[sel.selectedIndex]
       const name = opt ? (opt.getAttribute("data-fontname") || "sans-serif") : "sans-serif"
       const size = parseInt(document.getElementById("fontSize").value,10) || 14
-      return `${size}px "${name}", sans-serif`
+      // include emoji fallback faces so canvas can render them
+      return `${size}px "${name}", "Apple Color Emoji", "Segoe UI Emoji", emoji, sans-serif`
     }
 
     function measureTextWidth(text, fontCSS){
@@ -260,8 +267,13 @@
       const y = Math.floor((MAT_H - size) / 2)
       const sPx = Math.floor(shiftPx)
 
-      ctx.font = fontCSS
-      ctx.textBaseline = "top"
+     ctx.font = fontCSS
+     ctx.textBaseline = "alphabetic"   // IMPORTANT
+     const metrics = ctx.measureText(text)
+     const ascent  = metrics.actualBoundingBoxAscent || (size * 0.8)
+     const descent = metrics.actualBoundingBoxDescent || (size * 0.2)
+     const textH   = Math.ceil(ascent + descent)
+     const baselineY = Math.floor((MAT_H - textH) / 2 + ascent)
 
       if (crispInput.checked) {
         // draw in white, then threshold to the chosen color (hard edges)
@@ -270,7 +282,7 @@
           ctx.save()
           ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
           ctx.translate(-sPx, 0)
-          ctx.fillText(text, MAT_W, y)
+          ctx.fillText(text, MAT_W, baselineY)
           ctx.restore()
         } else {
           const textW = measureTextWidth(text, fontCSS)
@@ -278,7 +290,7 @@
           ctx.save()
           ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
           ctx.translate(canvasW - MAT_W - sPx, 0)
-          ctx.fillText(text, 0, y)
+          ctx.fillText(text, 0, baselineY)
           ctx.restore()
         }
         thresholdAndRecolor(ctx, MAT_W, MAT_H, color)
@@ -289,7 +301,7 @@
           ctx.save()
           ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
           ctx.translate(-sPx, 0)
-          ctx.fillText(text, MAT_W, y)
+          ctx.fillText(text, MAT_W, baselineY)
           ctx.restore()
         } else {
           const textW = measureTextWidth(text, fontCSS)
@@ -297,7 +309,7 @@
           ctx.save()
           ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
           ctx.translate(canvasW - MAT_W - sPx, 0)
-          ctx.fillText(text, 0, y)
+          ctx.fillText(text, 0, baselineY)
           ctx.restore()
         }
       }
@@ -382,5 +394,22 @@
     updatePortHelper()
     recalcPreview()
   </script>
+
+  <script>
+    // If no option is selected (edge case), try to pick “Arial Unicode”
+    (function ensureArialUnicodeDefault(){
+      const sel = document.getElementById("fontSelect");
+      if (!sel) return;
+      const hasSelected = Array.from(sel.options).some(o => o.selected);
+      if (hasSelected) return;
+      const target = Array.from(sel.options).find(
+        o => (o.getAttribute("data-fontname") || "").toLowerCase().includes("arial unicode")
+      );
+      if (target) {
+        target.selected = true;
+      }
+    })();
+  </script>
+
 </body>
 </html>

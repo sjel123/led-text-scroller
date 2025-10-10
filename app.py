@@ -7,6 +7,8 @@ import sys
 import socket
 import threading
 import time
+from pilmoji import Pilmoji
+import emoji as emoji_lib
 from pathlib import Path
 from typing import List, Tuple
 
@@ -20,7 +22,7 @@ MATRIX_H = 16
 MATRIX_W = 64
 PIXELS = MATRIX_W * MATRIX_H
 
-DEFAULT_TARGET_IP = "192.168.1.200"
+DEFAULT_TARGET_IP = "192.168.1.181"
 DEFAULT_SIMPLE_UDP_PORT = 7777
 DEFAULT_DDP_PORT = 4048
 WLED_UDP_DEFAULT_PORT = 21324  # WLED UDP Realtime
@@ -64,6 +66,10 @@ SYSTEM_FONTS = list_system_fonts()
 # =========================
 # RENDERING
 # =========================
+def contains_emoji(s: str) -> bool:
+    # returns True if any emoji is present
+    return bool(emoji_lib.emoji_list(s))
+
 def render_scrolling_frames(
     text: str,
     font_path: str | None,
@@ -72,38 +78,51 @@ def render_scrolling_frames(
     speed_px_per_sec: float,
     direction: str = "left",
     bg=(0, 0, 0),
-    crisp: bool = True,   # NEW
+    crisp: bool = True,   # make sure /start passes this (you already added it)
 ):
     W, H = MATRIX_W, MATRIX_H
+
+    # Load font (fallback safe)
     try:
-        font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
+        if font_path:
+            font = ImageFont.truetype(font_path, font_size)
+        else:
+            raise RuntimeError("No font path; using default")
     except Exception:
         font = ImageFont.load_default()
 
+    # Measure text width (approx to PIL raster width)
     tmp_img = Image.new("RGB", (1, 1))
     tmp_draw = ImageDraw.Draw(tmp_img)
     text_w = int(tmp_draw.textlength(text, font=font))
     text_h = font_size
+
     canvas_w = max(W, text_w + W)
     canvas_h = H
 
-    if crisp:
-        # 1-bit mask (hard edges), then colorize
+    has_emoji = contains_emoji(text)
+
+    if crisp and not has_emoji:
+        # --- CRISP (1-bit) path: razor-sharp glyphs (best for non-emoji text) ---
         full_mask = Image.new("1", (canvas_w, canvas_h), 0)
         md = ImageDraw.Draw(full_mask)
-        y = (canvas_h - text_h) // 2
+        y = center_y_for_text(text, font, canvas_h)
         md.text((W, y), text, fill=1, font=font)
 
         full_color = Image.new("RGB", (canvas_w, canvas_h), bg)
         color_layer = Image.new("RGB", (canvas_w, canvas_h), color_rgb)
         full_color.paste(color_layer, (0, 0), full_mask)
     else:
-        # normal anti-aliased render
+        # --- COLOR EMOJI path (or smooth text): use Pilmoji to draw full-color emoji ---
+        # Note: we draw the WHOLE string with Pilmoji so emojis appear properly.
         full_color = Image.new("RGB", (canvas_w, canvas_h), bg)
-        d = ImageDraw.Draw(full_color)
-        y = (canvas_h - text_h) // 2
-        d.text((W, y), text, fill=color_rgb, font=font)
+        y = center_y_for_text(text, font, canvas_h)
+        with Pilmoji(full_color) as pm:
+            # If you want non-emoji text tinted to color_rgb, keep fill=color_rgb.
+            # Emojis keep their own colors; letters use the chosen color.
+            pm.text((W, y), text, font=font, fill=color_rgb)
 
+    # Build frames by cropping the strip
     frames = []
     if direction == "left":
         for shift in range(0, W + text_w):
@@ -116,7 +135,6 @@ def render_scrolling_frames(
 
     delay = 1.0 / max(speed_px_per_sec, 1.0)
     return frames, W, H, delay
-
 
 def map_serpentine(rgb_bytes: bytes, w: int, h: int) -> bytes:
     """
@@ -138,6 +156,28 @@ def map_serpentine(rgb_bytes: bytes, w: int, h: int) -> bytes:
                 rev[dst : dst + 3] = row_data[src : src + 3]
             out[row * row_len : (row + 1) * row_len] = rev
     return bytes(out)
+
+def measure_text_bbox_pil(text: str, font: ImageFont.FreeTypeFont) -> Tuple[int,int,int,int]:
+    """
+    Measure the exact drawn bounds for text (no stroke), using Pillow.
+    Returns (left, top, right, bottom) in pixels.
+    """
+    # 1x1 temp to get a draw context (Pillow requires a canvas)
+    tmp = Image.new("L", (2, 2), 0)
+    d = ImageDraw.Draw(tmp)
+    # textbbox is available in Pillow ≥8; very accurate
+    bbox = d.textbbox((0, 0), text, font=font)
+    return bbox  # (l, t, r, b)
+
+def center_y_for_text(text: str, font: ImageFont.FreeTypeFont, canvas_h: int) -> int:
+    """
+    Compute the Y where you should draw the text so it's vertically centered.
+    We’ll draw at (x, y) with Pillow's default baseline ('left' anchor).
+    """
+    l, t, r, b = measure_text_bbox_pil(text, font)
+    text_h = max(0, b - t)
+    # Shift so the *top* of the text bbox is vertically centered
+    return (canvas_h - text_h) // 2 - t
 
 # =========================
 # PROTOCOL BUILDERS
