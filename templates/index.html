@@ -26,7 +26,7 @@
     .buttons { display:flex; gap:12px; margin-top:16px; flex-wrap: wrap; }
     button {
       border: none; border-radius: 12px; padding: 12px 16px; cursor: pointer; font-weight: 700;
-      background: #111827; color: white; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      background: #111827; color: white; box-shadow: 0 2px 10px rgba(0,0,0,0.15);
     }
     button.secondary { background: #374151; }
     .hint { color: #6b7280; font-size: 13px; margin-top: 6px; }
@@ -34,6 +34,8 @@
     .preview-tools { display:flex; gap:12px; align-items:center; flex-wrap: wrap; }
     .preview-tools label { margin: 0 6px 0 0; font-weight: 600; }
     canvas { image-rendering: pixelated; border-radius: 10px; }
+    .subrow { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .inline { display:flex; align-items:center; gap:8px; }
   </style>
 </head>
 <body>
@@ -55,7 +57,7 @@
         <button id="previewReset" class="secondary">Reset</button>
       </div>
     </div>
-    <div class="hint">Crisp = hard 1-bit edges (matches LED “crisp” mode). Static display is centered. “Center when short” only affects Scroll mode.</div>
+    <div class="hint">Crisp = hard 1-bit edges (matches LED “crisp” mode). Static display is centered. Gradients apply in crisp mode.</div>
   </div>
 
   <!-- Controls -->
@@ -83,10 +85,34 @@
         <label for="fontSize">Font size (px)</label>
         <input id="fontSize" type="number" min="6" max="64" value="16" />
       </div>
+
+      <!-- Color / Gradient controls -->
       <div>
+        <label for="colorMode">Color mode</label>
+        <select id="colorMode">
+          <option value="solid" selected>Solid</option>
+          <option value="gradient">Gradient</option>
+        </select>
+      </div>
+      <div id="solidColorBox">
         <label for="color">Color</label>
         <input id="color" type="color" value="#ffffff" />
       </div>
+      <div id="gradientBox" style="display:none">
+        <label for="gradientPreset">Gradient preset</label>
+        <div class="subrow">
+          <select id="gradientPreset">
+            <option value="rainbow" selected>Rainbow (HSV)</option>
+            <option value="fire">Fire</option>
+            <option value="ocean">Ocean</option>
+            <option value="sunset">Sunset</option>
+            <option value="ice">Ice</option>
+          </select>
+          <label class="inline"><input id="gradientReverse" type="checkbox" /> Reverse</label>
+        </div>
+        <div class="hint">Rainbow = hue sweep; others are curated color ramps.</div>
+      </div>
+
       <div>
         <label for="speed">Speed (pixels/sec)</label>
         <input id="speed" type="number" min="1" max="200" value="40" />
@@ -155,6 +181,92 @@
       const v = hex.replace("#","")
       return [parseInt(v.slice(0,2),16), parseInt(v.slice(2,4),16), parseInt(v.slice(4,6),16)]
     }
+    function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+
+    function hsvToRgb(h, s, v){
+      let r=0,g=0,b=0;
+      let i = Math.floor(h*6);
+      let f = h*6 - i;
+      let p = v*(1-s);
+      let q = v*(1-f*s);
+      let t = v*(1-(1-f)*s);
+      switch(i%6){
+        case 0: r=v,g=t,b=p; break;
+        case 1: r=q,g=v,b=p; break;
+        case 2: r=p,g=v,b=t; break;
+        case 3: r=p,g=q,b=v; break;
+        case 4: r=t,g=p,b=v; break;
+        case 5: r=v,g=p,b=q; break;
+      }
+      return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
+    }
+
+    function lerp(a,b,t){ return a + (b-a)*t; }
+    function lerpRgb(a,b,t){
+      return [Math.round(lerp(a[0],b[0],t)), Math.round(lerp(a[1],b[1],t)), Math.round(lerp(a[2],b[2],t))];
+    }
+
+    // Gradients
+    function gradientPresetColor(t, preset){
+      t = clamp01(t);
+      if(preset === "rainbow"){
+        // Hue sweep (0..1)
+        return hsvToRgb(t, 1, 1);
+      }
+      if(preset === "fire"){
+        const stops = [
+          [0,0,0], [120,0,0], [220,40,0], [255,140,0], [255,220,0], [255,255,255]
+        ];
+        const pos = [0.00, 0.15, 0.35, 0.60, 0.85, 1.00];
+        for(let i=0;i<pos.length-1;i++){
+          if(t>=pos[i] && t<=pos[i+1]){ 
+            const lt=(t-pos[i])/(pos[i+1]-pos[i]);
+            return lerpRgb(stops[i], stops[i+1], lt);
+          }
+        }
+        return stops[stops.length-1];
+      }
+      if(preset === "ocean"){
+        const stops = [[0,10,40],[0,90,160],[0,180,255],[120,220,255]];
+        const pos   = [0.0, 0.4, 0.8, 1.0];
+        for(let i=0;i<pos.length-1;i++){
+          if(t>=pos[i] && t<=pos[i+1]){
+            const lt=(t-pos[i])/(pos[i+1]-pos[i]);
+            return lerpRgb(stops[i], stops[i+1], lt);
+          }
+        }
+        return stops[stops.length-1];
+      }
+      if(preset === "sunset"){
+        const stops = [[120,0,80],[200,40,0],[255,120,0],[255,220,120]];
+        const pos   = [0.0, 0.35, 0.7, 1.0];
+        for(let i=0;i<pos.length-1;i++){
+          if(t>=pos[i] && t<=pos[i+1]){
+            const lt=(t-pos[i])/(pos[i+1]-pos[i]);
+            return lerpRgb(stops[i], stops[i+1], lt);
+          }
+        }
+        return stops[stops.length-1];
+      }
+      if(preset === "ice"){
+        const stops = [[255,255,255],[200,240,255],[160,220,255],[120,200,255],[80,180,255]];
+        const pos   = [0.0, 0.25, 0.5, 0.75, 1.0];
+        for(let i=0;i<pos.length-1;i++){
+          if(t>=pos[i] && t<=pos[i+1]){
+            const lt=(t-pos[i])/(pos[i+1]-pos[i]);
+            return lerpRgb(stops[i], stops[i+1], lt);
+          }
+        }
+        return stops[stops.length-1];
+      }
+      return [255,255,255];
+    }
+
+    function updateColorModeUI(){
+      const isGrad = document.getElementById("colorMode").value === "gradient";
+      document.getElementById("solidColorBox").style.display = isGrad ? "none" : "";
+      document.getElementById("gradientBox").style.display = isGrad ? "" : "none";
+    }
 
     function updatePortHelper(){
       const modeSel = document.getElementById("mode")
@@ -190,6 +302,11 @@
     const gridInput = document.getElementById("grid")
     const crispInput = document.getElementById("crisp")
     const centerShortInput = document.getElementById("centerShort")
+    const colorModeInput = document.getElementById("colorMode")
+    const solidColorInput = document.getElementById("color")
+    const gradientPresetInput = document.getElementById("gradientPreset")
+    const gradientReverseInput = document.getElementById("gradientReverse")
+
     const previewPlayBtn = document.getElementById("previewPlay")
     const previewPauseBtn = document.getElementById("previewPause")
     const previewResetBtn = document.getElementById("previewReset")
@@ -234,22 +351,24 @@
       ctx.restore()
     }
 
-    function thresholdAndRecolor(ctx, w, h, hexColor){
-      const [rC,gC,bC] = hexToRgb(hexColor)
+    // recolor white text to gradient within text bounds [x0, x1)
+    function recolorWithGradient(ctx, w, h, x0, x1, preset, reversed){
       const img = ctx.getImageData(0,0,w,h)
       const d = img.data
-      for(let i=0;i<d.length;i+=4){
-        const lum = (d[i]*0.2126 + d[i+1]*0.7152 + d[i+2]*0.0722)
-        if(lum >= 128){
-          d[i]   = rC
-          d[i+1] = gC
-          d[i+2] = bC
-          d[i+3] = 255
-        }else{
-          d[i]   = 0
-          d[i+1] = 0
-          d[i+2] = 0
-          d[i+3] = 255
+      for(let y=0;y<h;y++){
+        for(let x=0;x<w;x++){
+          const i = (y*w + x)*4
+          // treat white-ish pixels (from crisp draw) as ink
+          const lum = (d[i]*0.2126 + d[i+1]*0.7152 + d[i+2]*0.0722)
+          if(lum >= 128){
+            let t = (x1> x0) ? (x - x0) / (x1 - x0) : 0
+            if(reversed) t = 1 - t
+            t = clamp01(t)
+            const [r,g,b] = gradientPresetColor(t, preset)
+            d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = 255
+          }else{
+            d[i] = 0; d[i+1] = 0; d[i+2] = 0; d[i+3] = 255
+          }
         }
       }
       ctx.putImageData(img,0,0)
@@ -274,12 +393,17 @@
       ctx.fillRect(0,0,MAT_W,MAT_H)
 
       const text = document.getElementById("text").value
-      const color = document.getElementById("color").value
       const dir = document.getElementById("direction").value
       const disp = document.getElementById("displayMode").value
       const fontCSS = currentFontCSS()
       const size = parseInt(document.getElementById("fontSize").value,10) || 16
+      const isCrisp = !!crispInput.checked
+      const isGradient = (colorModeInput.value === "gradient")
+      const preset = gradientPresetInput.value
+      const reversed = !!gradientReverseInput.checked
+      const solidHex = solidColorInput.value
 
+      // Vertical centering
       ctx.font = fontCSS
       ctx.textBaseline = "alphabetic"
       const metrics = ctx.measureText(text)
@@ -290,50 +414,67 @@
       const textW = measureTextWidth(text, fontCSS)
       const centerX = Math.floor((MAT_W - textW)/2)
 
+      let xDraw = 0, x0 = 0, x1 = 0;
+
       if (disp === "static") {
-        const x = centerX
-        if (document.getElementById("crisp").checked) {
+        xDraw = centerX
+        // Draw white for crisp or solid color directly
+        if (isCrisp) {
           ctx.fillStyle = "#ffffff"
-          ctx.fillText(text, x, baselineY)
-          thresholdAndRecolor(ctx, MAT_W, MAT_H, color)
+          ctx.fillText(text, xDraw, baselineY)
+          if(isGradient){
+            x0 = xDraw; x1 = xDraw + textW
+            recolorWithGradient(ctx, MAT_W, MAT_H, x0, x1, preset, reversed)
+          } else {
+            thresholdAndRecolor(ctx, MAT_W, MAT_H, solidHex)
+          }
         } else {
-          ctx.fillStyle = color
-          ctx.fillText(text, x, baselineY)
+          // smooth preview: just solid color
+          ctx.fillStyle = solidHex
+          ctx.fillText(text, xDraw, baselineY)
         }
       } else {
-        // SCROLL MODE
         const sPx = Math.floor(shiftPx)
         const useCenterShort = !!centerShortInput.checked && (textW < MAT_W)
 
-        if (document.getElementById("crisp").checked) {
+        if (isCrisp) {
           ctx.fillStyle = "#ffffff"
           if(useCenterShort){
-            // Draw centered, translate to create slide-out
             ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-            ctx.translate((dir === "left" ? -sPx : sPx), 0)
-            ctx.fillText(text, centerX, baselineY)
+            const delta = (dir === "left" ? -sPx : sPx)
+            xDraw = centerX + delta
+            ctx.fillText(text, xDraw, baselineY)
             ctx.restore()
+            x0 = Math.max(0, Math.min(MAT_W, xDraw))
+            x1 = Math.max(0, Math.min(MAT_W, xDraw + textW))
           } else {
-            // Original off-edge scroll
             if(dir === "left"){
               ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
               ctx.translate(-sPx,0)
               ctx.fillText(text, MAT_W, baselineY)
               ctx.restore()
+              x0 = 0; x1 = MAT_W; // text spans through; decent approximation
             } else {
               const canvasW = Math.max(MAT_W, textW + MAT_W)
               ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
               ctx.translate(canvasW - MAT_W - sPx, 0)
               ctx.fillText(text, 0, baselineY)
               ctx.restore()
+              x0 = 0; x1 = MAT_W;
             }
           }
-          thresholdAndRecolor(ctx, MAT_W, MAT_H, color)
+          if(isGradient){
+            recolorWithGradient(ctx, MAT_W, MAT_H, x0, x1, preset, reversed)
+          } else {
+            thresholdAndRecolor(ctx, MAT_W, MAT_H, solidHex)
+          }
         } else {
-          ctx.fillStyle = color
+          // smooth: solid only in preview
+          ctx.fillStyle = solidHex
           if(useCenterShort){
+            const delta = (dir === "left" ? -sPx : sPx)
             ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-            ctx.translate((dir === "left" ? -sPx : sPx), 0)
+            ctx.translate(delta, 0)
             ctx.fillText(text, centerX, baselineY)
             ctx.restore()
           } else {
@@ -357,6 +498,22 @@
       ctx.restore()
     }
 
+    // crisp recolor helper (solid)
+    function thresholdAndRecolor(ctx, w, h, hexColor){
+      const [rC,gC,bC] = hexToRgb(hexColor)
+      const img = ctx.getImageData(0,0,w,h)
+      const d = img.data
+      for(let i=0;i<d.length;i+=4){
+        const lum = (d[i]*0.2126 + d[i+1]*0.7152 + d[i+2]*0.0722)
+        if(lum >= 128){
+          d[i]=rC; d[i+1]=gC; d[i+2]=bC; d[i+3]=255
+        }else{
+          d[i]=0; d[i+1]=0; d[i+2]=0; d[i+3]=255
+        }
+      }
+      ctx.putImageData(img,0,0)
+    }
+
     function animatePreview(ts){
       const disp = document.getElementById("displayMode").value
       if (disp === "static") {
@@ -364,20 +521,17 @@
         animReq = requestAnimationFrame(animatePreview)
         return
       }
-
       if(!lastTs) lastTs = ts
       const dt = (ts - lastTs) / 1000.0
       lastTs = ts
-
       const speed = Math.max(1, parseFloat(document.getElementById("speed").value)||40)
       shift += speed * dt
       if(shift >= maxShift) shift = 0
-
       drawFrame(shift)
       animReq = requestAnimationFrame(animatePreview)
     }
 
-    // preview controls
+    // UI bindings
     document.getElementById("previewPlay").addEventListener("click", () => {
       if(animReq) return
       recalcPreview()
@@ -391,15 +545,18 @@
       recalcPreview()
     })
 
-    // Re-render preview when paused
-    ;["text","fontSelect","fontSize","color","speed","direction","crisp","displayMode","centerShort"].forEach(id => {
-      document.getElementById(id).addEventListener("input", () => { if(!animReq) recalcPreview() })
-      document.getElementById(id).addEventListener("change", () => { if(!animReq) recalcPreview() })
+    ;["text","fontSelect","fontSize","speed","direction","crisp","displayMode","centerShort","colorMode","color","gradientPreset","gradientReverse"].forEach(id => {
+      const el = document.getElementById(id)
+      el.addEventListener("change", () => { 
+        if(id==="colorMode") updateColorModeUI();
+        if(!animReq) recalcPreview();
+      })
+      el.addEventListener("input", () => { if(!animReq) recalcPreview() })
     })
     scaleInput.addEventListener("change", () => { applyScale(); if(!animReq) drawFrame(0) })
     gridInput.addEventListener("change", () => { if(!animReq) drawFrame(0) })
 
-    // Smart UX: if user changes speed/direction while static, switch to scroll
+    // Smart UX: changing speed/direction while static flips to scroll
     function nudgeToScrollIfStatic() {
       const sel = document.getElementById("displayMode");
       if (sel.value === "static") {
@@ -412,7 +569,7 @@
     document.getElementById("speed").addEventListener("change", nudgeToScrollIfStatic);
     document.getElementById("direction").addEventListener("change", nudgeToScrollIfStatic);
 
-    // ---------- send controls ----------
+    // Send controls
     document.getElementById("startBtn").addEventListener("click", async () => {
       if(!animReq){ recalcPreview(); animReq = requestAnimationFrame(animatePreview) }
 
@@ -420,7 +577,12 @@
         text: document.getElementById("text").value,
         font_path: document.getElementById("fontSelect").value,
         font_size: parseInt(document.getElementById("fontSize").value, 10),
+        // color fields
+        color_mode: document.getElementById("colorMode").value,  // "solid" | "gradient"
         color: hexToRgb(document.getElementById("color").value),
+        gradient_preset: document.getElementById("gradientPreset").value,
+        gradient_reverse: !!document.getElementById("gradientReverse").checked,
+
         speed: parseFloat(document.getElementById("speed").value),
         direction: document.getElementById("direction").value,
         serpentine: document.getElementById("layout").value === "serpentine",
@@ -450,11 +612,12 @@
       try { await fetch("/stop", {method:"POST"}) } catch(e){}
     })
 
-    // ---------- init ----------
+    // init
     updatePortHelper()
     updateDisplayModeUI()
+    updateColorModeUI()
 
-    // If nothing preselected, prefer Arial Unicode
+    // Prefer Arial Unicode if not already selected
     ;(function ensureArialUnicodeDefault(){
       const sel = document.getElementById("fontSelect");
       if (!sel) return;
