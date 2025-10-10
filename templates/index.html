@@ -26,7 +26,7 @@
     .buttons { display:flex; gap:12px; margin-top:16px; flex-wrap: wrap; }
     button {
       border: none; border-radius: 12px; padding: 12px 16px; cursor: pointer; font-weight: 700;
-      background: #111827; color: white; box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+      background: #111827; color: white; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     }
     button.secondary { background: #374151; }
     .hint { color: #6b7280; font-size: 13px; margin-top: 6px; }
@@ -57,13 +57,13 @@
         <button id="previewReset" class="secondary">Reset</button>
       </div>
     </div>
-    <div class="hint">Crisp = hard 1-bit edges (matches LED “crisp” mode). Static display is centered. Gradients apply in crisp mode.</div>
+    <div class="hint">Crisp = hard 1-bit edges (matches LED “crisp” mode). Static display is centered. Gradients apply in crisp & smooth, with emojis.</div>
   </div>
 
   <!-- Controls -->
   <div class="card">
     <label for="text">Text</label>
-    <input id="text" type="text" placeholder="Type your message..." value="Hello, world! 👋" />
+    <input id="text" type="text" placeholder="Type your message..." value="Hello, world! 🌈🚀" />
 
     <div class="row">
       <div>
@@ -74,9 +74,7 @@
             value="{{path}}"
             data-fontname="{{name}}"
             {% if "Arial Unicode" in name %}selected{% endif %}
-          >
-            {{name}}
-          </option>
+          >{{name}}</option>
           {% endfor %}
         </select>
         <div class="hint">Uses macOS fonts from /System/Library/Fonts, /Library/Fonts, and ~/Library/Fonts.</div>
@@ -110,7 +108,13 @@
           </select>
           <label class="inline"><input id="gradientReverse" type="checkbox" /> Reverse</label>
         </div>
-        <div class="hint">Rainbow = hue sweep; others are curated color ramps.</div>
+        <div class="subrow">
+          <div style="flex:1 1 260px">
+            <label for="gradientShift">Gradient shift (px/sec)</label>
+            <input id="gradientShift" type="number" step="1" value="0" />
+          </div>
+        </div>
+        <div class="hint">Animate the gradient horizontally at the given pixels/second.</div>
       </div>
 
       <div>
@@ -206,11 +210,10 @@
       return [Math.round(lerp(a[0],b[0],t)), Math.round(lerp(a[1],b[1],t)), Math.round(lerp(a[2],b[2],t))];
     }
 
-    // Gradients
+    // Gradient palette
     function gradientPresetColor(t, preset){
       t = clamp01(t);
       if(preset === "rainbow"){
-        // Hue sweep (0..1)
         return hsvToRgb(t, 1, 1);
       }
       if(preset === "fire"){
@@ -272,15 +275,9 @@
       const modeSel = document.getElementById("mode")
       const portInput = document.getElementById("port")
       const mode = modeSel.value
-      if(mode === "simple" && (!portInput.value || ["4048","21324"].includes(portInput.value))) {
-        portInput.value = "7777"
-      }
-      if(mode === "ddp" && (!portInput.value || ["7777","21324"].includes(portInput.value))) {
-        portInput.value = "{{ default_ddp_port or 4048 }}"
-      }
-      if(mode === "wled_udp" && (!portInput.value || ["7777","4048"].includes(portInput.value))) {
-        portInput.value = "21324"
-      }
+      if(mode === "simple" && (!portInput.value || ["4048","21324"].includes(portInput.value))) portInput.value = "7777";
+      if(mode === "ddp" && (!portInput.value || ["7777","21324"].includes(portInput.value)))  portInput.value = "{{ default_ddp_port or 4048 }}";
+      if(mode === "wled_udp" && (!portInput.value || ["7777","4048"].includes(portInput.value))) portInput.value = "21324";
     }
     document.getElementById("mode").addEventListener("change", updatePortHelper)
 
@@ -302,10 +299,12 @@
     const gridInput = document.getElementById("grid")
     const crispInput = document.getElementById("crisp")
     const centerShortInput = document.getElementById("centerShort")
+
     const colorModeInput = document.getElementById("colorMode")
     const solidColorInput = document.getElementById("color")
     const gradientPresetInput = document.getElementById("gradientPreset")
     const gradientReverseInput = document.getElementById("gradientReverse")
+    const gradientShiftInput = document.getElementById("gradientShift")
 
     const previewPlayBtn = document.getElementById("previewPlay")
     const previewPauseBtn = document.getElementById("previewPause")
@@ -316,6 +315,7 @@
     let maxShift = 0
     let lastTs = 0
 
+    let gradShift = 0  // pixels
     function currentFontCSS(){
       const sel = document.getElementById("fontSelect")
       const opt = sel.options[sel.selectedIndex]
@@ -351,19 +351,20 @@
       ctx.restore()
     }
 
-    // recolor white text to gradient within text bounds [x0, x1)
-    function recolorWithGradient(ctx, w, h, x0, x1, preset, reversed){
+    // recolor white text to gradient across [0..W) with shift offset
+    function recolorWithGradient(ctx, w, h, preset, reversed, shiftPx){
       const img = ctx.getImageData(0,0,w,h)
       const d = img.data
+      const period = w
       for(let y=0;y<h;y++){
         for(let x=0;x<w;x++){
           const i = (y*w + x)*4
-          // treat white-ish pixels (from crisp draw) as ink
           const lum = (d[i]*0.2126 + d[i+1]*0.7152 + d[i+2]*0.0722)
           if(lum >= 128){
-            let t = (x1> x0) ? (x - x0) / (x1 - x0) : 0
+            let xx = (x + Math.floor(shiftPx)) % period
+            if(xx < 0) xx += period
+            let t = xx / (period - 1 || 1)
             if(reversed) t = 1 - t
-            t = clamp01(t)
             const [r,g,b] = gradientPresetColor(t, preset)
             d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = 255
           }else{
@@ -376,6 +377,7 @@
 
     function recalcPreview(){
       shift = 0
+      gradShift = 0
       lastTs = 0
       const text = document.getElementById("text").value
       const fontCSS = currentFontCSS()
@@ -403,7 +405,6 @@
       const reversed = !!gradientReverseInput.checked
       const solidHex = solidColorInput.value
 
-      // Vertical centering
       ctx.font = fontCSS
       ctx.textBaseline = "alphabetic"
       const metrics = ctx.measureText(text)
@@ -414,24 +415,24 @@
       const textW = measureTextWidth(text, fontCSS)
       const centerX = Math.floor((MAT_W - textW)/2)
 
-      let xDraw = 0, x0 = 0, x1 = 0;
-
       if (disp === "static") {
-        xDraw = centerX
-        // Draw white for crisp or solid color directly
+        const x = centerX
         if (isCrisp) {
           ctx.fillStyle = "#ffffff"
-          ctx.fillText(text, xDraw, baselineY)
+          ctx.fillText(text, x, baselineY)
           if(isGradient){
-            x0 = xDraw; x1 = xDraw + textW
-            recolorWithGradient(ctx, MAT_W, MAT_H, x0, x1, preset, reversed)
+            recolorWithGradient(ctx, MAT_W, MAT_H, preset, reversed, gradShift)
           } else {
             thresholdAndRecolor(ctx, MAT_W, MAT_H, solidHex)
           }
         } else {
-          // smooth preview: just solid color
-          ctx.fillStyle = solidHex
-          ctx.fillText(text, xDraw, baselineY)
+          // smooth: composite solid only in preview
+          if(isGradient){
+            ctx.fillStyle = "#ffffff"; ctx.fillText(text, x, baselineY)
+            recolorWithGradient(ctx, MAT_W, MAT_H, preset, reversed, gradShift)
+          } else {
+            ctx.fillStyle = solidHex; ctx.fillText(text, x, baselineY)
+          }
         }
       } else {
         const sPx = Math.floor(shiftPx)
@@ -442,53 +443,71 @@
           if(useCenterShort){
             ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
             const delta = (dir === "left" ? -sPx : sPx)
-            xDraw = centerX + delta
-            ctx.fillText(text, xDraw, baselineY)
+            ctx.fillText(text, centerX + delta, baselineY)
             ctx.restore()
-            x0 = Math.max(0, Math.min(MAT_W, xDraw))
-            x1 = Math.max(0, Math.min(MAT_W, xDraw + textW))
           } else {
             if(dir === "left"){
               ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
               ctx.translate(-sPx,0)
               ctx.fillText(text, MAT_W, baselineY)
               ctx.restore()
-              x0 = 0; x1 = MAT_W; // text spans through; decent approximation
             } else {
               const canvasW = Math.max(MAT_W, textW + MAT_W)
               ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
               ctx.translate(canvasW - MAT_W - sPx, 0)
               ctx.fillText(text, 0, baselineY)
               ctx.restore()
-              x0 = 0; x1 = MAT_W;
             }
           }
           if(isGradient){
-            recolorWithGradient(ctx, MAT_W, MAT_H, x0, x1, preset, reversed)
+            recolorWithGradient(ctx, MAT_W, MAT_H, preset, reversed, gradShift)
           } else {
             thresholdAndRecolor(ctx, MAT_W, MAT_H, solidHex)
           }
         } else {
-          // smooth: solid only in preview
-          ctx.fillStyle = solidHex
-          if(useCenterShort){
-            const delta = (dir === "left" ? -sPx : sPx)
-            ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-            ctx.translate(delta, 0)
-            ctx.fillText(text, centerX, baselineY)
-            ctx.restore()
-          } else {
-            if(dir === "left"){
+          // smooth: allow gradient too by recoloring alpha'd text
+          if(isGradient){
+            ctx.fillStyle = "#ffffff"
+            if(useCenterShort){
+              const delta = (dir === "left" ? -sPx : sPx)
               ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-              ctx.translate(-sPx,0)
-              ctx.fillText(text, MAT_W, baselineY)
+              ctx.fillText(text, centerX + delta, baselineY)
               ctx.restore()
             } else {
-              const canvasW = Math.max(MAT_W, textW + MAT_W)
+              if(dir === "left"){
+                ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+                ctx.translate(-sPx,0)
+                ctx.fillText(text, MAT_W, baselineY)
+                ctx.restore()
+              } else {
+                const canvasW = Math.max(MAT_W, textW + MAT_W)
+                ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+                ctx.translate(canvasW - MAT_W - sPx, 0)
+                ctx.fillText(text, 0, baselineY)
+                ctx.restore()
+              }
+            }
+            recolorWithGradient(ctx, MAT_W, MAT_H, preset, reversed, gradShift)
+          } else {
+            ctx.fillStyle = solidHex
+            if(useCenterShort){
+              const delta = (dir === "left" ? -sPx : sPx)
               ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-              ctx.translate(canvasW - MAT_W - sPx, 0)
-              ctx.fillText(text, 0, baselineY)
+              ctx.fillText(text, centerX + delta, baselineY)
               ctx.restore()
+            } else {
+              if(dir === "left"){
+                ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+                ctx.translate(-sPx,0)
+                ctx.fillText(text, MAT_W, baselineY)
+                ctx.restore()
+              } else {
+                const canvasW = Math.max(MAT_W, textW + MAT_W)
+                ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+                ctx.translate(canvasW - MAT_W - sPx, 0)
+                ctx.fillText(text, 0, baselineY)
+                ctx.restore()
+              }
             }
           }
         }
@@ -516,17 +535,21 @@
 
     function animatePreview(ts){
       const disp = document.getElementById("displayMode").value
-      if (disp === "static") {
-        drawFrame(0)
-        animReq = requestAnimationFrame(animatePreview)
-        return
-      }
       if(!lastTs) lastTs = ts
       const dt = (ts - lastTs) / 1000.0
       lastTs = ts
-      const speed = Math.max(1, parseFloat(document.getElementById("speed").value)||40)
-      shift += speed * dt
-      if(shift >= maxShift) shift = 0
+
+      // text scroll
+      if (disp === "scroll") {
+        const speed = Math.max(1, parseFloat(document.getElementById("speed").value)||40)
+        shift += speed * dt
+        if(shift >= maxShift) shift = 0
+      }
+
+      // gradient shift
+      const gspd = parseFloat(gradientShiftInput.value)||0
+      gradShift = (gradShift + gspd * dt) % MAT_W
+
       drawFrame(shift)
       animReq = requestAnimationFrame(animatePreview)
     }
@@ -545,7 +568,7 @@
       recalcPreview()
     })
 
-    ;["text","fontSelect","fontSize","speed","direction","crisp","displayMode","centerShort","colorMode","color","gradientPreset","gradientReverse"].forEach(id => {
+    ;["text","fontSelect","fontSize","speed","direction","crisp","displayMode","centerShort","colorMode","color","gradientPreset","gradientReverse","gradientShift"].forEach(id => {
       const el = document.getElementById(id)
       el.addEventListener("change", () => { 
         if(id==="colorMode") updateColorModeUI();
@@ -577,11 +600,12 @@
         text: document.getElementById("text").value,
         font_path: document.getElementById("fontSelect").value,
         font_size: parseInt(document.getElementById("fontSize").value, 10),
-        // color fields
-        color_mode: document.getElementById("colorMode").value,  // "solid" | "gradient"
+
+        color_mode: document.getElementById("colorMode").value,
         color: hexToRgb(document.getElementById("color").value),
         gradient_preset: document.getElementById("gradientPreset").value,
         gradient_reverse: !!document.getElementById("gradientReverse").checked,
+        gradient_shift_speed: parseFloat(document.getElementById("gradientShift").value)||0,
 
         speed: parseFloat(document.getElementById("speed").value),
         direction: document.getElementById("direction").value,

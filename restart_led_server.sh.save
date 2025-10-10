@@ -1,0 +1,17 @@
+
+
+# Save the script
+cd ~/Documents/LEDMatrix/led_text_app
+nano restart_led_server.sh   # paste the script above
+chmod +x restart_led_server.sh
+
+# If using launchctl service com.led.scroller:
+./restart_led_server.sh restart
+./restart_led_server.sh status
+./restart_led_server.sh stop
+./restart_led_server.sh start
+
+# If running gunicorn manually (not via launchctl):
+# (Adjust APP_DIR / VENV_BIN / GUNICORN_BIND if different)
+./restart_led_server.sh restart
+

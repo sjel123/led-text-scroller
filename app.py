@@ -6,9 +6,9 @@ import threading
 from typing import List, Tuple, Optional
 
 from flask import Flask, render_template, request, jsonify
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont
 
-# Optional emoji support (Pilmoji)
+# Optional emoji support
 try:
     from pilmoji import Pilmoji
     PILMOJI_AVAILABLE = True
@@ -27,7 +27,6 @@ except Exception:
 # =========================
 MATRIX_H = 16
 MATRIX_W = 64
-PIXELS = MATRIX_W * MATRIX_H
 
 DEFAULT_TARGET_IP = "192.168.1.181"
 DEFAULT_SIMPLE_UDP_PORT = 7777
@@ -153,47 +152,42 @@ def gradient_preset_color(t: float, preset: str) -> Tuple[int,int,int]:
             return lerp_rgb(stops[i], stops[i+1], lt)
     return stops[-1]
 
-def make_horizontal_gradient(width: int, height: int, preset: str, reverse: bool=False) -> Image.Image:
+def make_horizontal_gradient(width: int, height: int, preset: str, reverse: bool=False,
+                             offset_px: int = 0, period_w: Optional[int] = None) -> Image.Image:
+    """Gradient image with wrap-around horizontal offset."""
     img = Image.new("RGB", (width, height), (0,0,0))
     px = img.load()
+    period = period_w if period_w and period_w > 0 else width
     for x in range(width):
-        t = x/(max(1,width-1))
-        if reverse: t = 1.0 - t
-        col = gradient_preset_color(t, preset)
-        for y in range(height):
-            px[x,y] = col
+      xx = (x + offset_px) % period
+      t = xx / float(max(1, period - 1))
+      if reverse: t = 1.0 - t
+      col = gradient_preset_color(t, preset)
+      for y in range(height):
+        px[x,y] = col
     return img
 
 
 # =========================
-# TEXT → ALPHA MASK (works with emojis & smooth)
+# TEXT → ALPHA MASK
 # =========================
 def make_text_mask(canvas_w: int, canvas_h: int, x: int, y: int,
                    text: str, font: ImageFont.FreeTypeFont,
                    use_pilmoji: bool, crisp: bool) -> Image.Image:
-    """
-    Returns an 'L' image where alpha represents the text (and emojis) coverage.
-    - If use_pilmoji: render to RGBA then take alpha channel.
-    - Else: draw anti-aliased text directly to 'L'.
-    If crisp=True, threshold to 0/255 to get hard edges.
-    """
+    """Return 'L' mask for text/emoji. If crisp, threshold to 1-bit edges."""
     if use_pilmoji:
         rgba = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
         if PILMOJI_AVAILABLE:
             with Pilmoji(rgba) as pm:
                 pm.text((x, y), text, font=font, fill=(255,255,255,255))
         else:
-            # fallback: draw as plain (emojis missing), still returns a mask
             d = ImageDraw.Draw(rgba)
             d.text((x, y), text, font=font, fill=(255,255,255,255))
-        mask = rgba.split()[-1]  # alpha
+        mask = rgba.split()[-1]
     else:
         mask = Image.new("L", (canvas_w, canvas_h), 0)
-        d = ImageDraw.Draw(mask)
-        d.text((x, y), text, font=font, fill=255)
-
+        ImageDraw.Draw(mask).text((x, y), text, font=font, fill=255)
     if crisp:
-        # hard 1-bit edges
         mask = mask.point(lambda a: 255 if a >= 128 else 0, mode='1').convert('L')
     return mask
 
@@ -210,25 +204,23 @@ def render_static_frame(
     color_mode: str = "solid",
     gradient_preset: str = "rainbow",
     gradient_reverse: bool = False,
+    gradient_shift_px: int = 0,
 ) -> bytes:
     W, H = MATRIX_W, MATRIX_H
     text_w = measure_text_width(text, font)
     x = (W - text_w) // 2
     y = center_y_for_text(text, font, H)
-
     use_pilmoji = contains_emoji(text)
 
     if color_mode == "gradient":
-        # Compose gradient through alpha mask (works with emojis & smooth)
         mask = make_text_mask(W, H, x, y, text, font, use_pilmoji, crisp)
-        grad = make_horizontal_gradient(W, H, gradient_preset, gradient_reverse)
+        grad = make_horizontal_gradient(W, H, gradient_preset, gradient_reverse, offset_px=gradient_shift_px, period_w=W)
         out = Image.new("RGB", (W, H), bg)
         out.paste(grad, (0,0), mask)
         return out.tobytes()
 
-    # Solid color path
     if crisp and not use_pilmoji:
-        mask = make_text_mask(W, H, x, y, text, font, use_pilmoji=False, crisp=True)
+        mask = make_text_mask(W, H, x, y, text, font, False, True)
         out = Image.new("RGB", (W, H), bg)
         out.paste(Image.new("RGB", (W, H), color_rgb), (0,0), mask)
     else:
@@ -241,89 +233,54 @@ def render_static_frame(
     return out.tobytes()
 
 
-def render_scrolling_frames(
+def render_scroll_window_frame(
     text: str,
     font: ImageFont.FreeTypeFont,
-    color_rgb: Tuple[int, int, int],
-    speed_px_per_sec: float,
-    direction: str = "left",
-    bg=(0, 0, 0),
-    crisp: bool = True,
-    center_when_short: bool = False,
-    color_mode: str = "solid",
-    gradient_preset: str = "rainbow",
-    gradient_reverse: bool = False,
-) -> Tuple[list, int, int, float]:
-    """
-    Generates frames for one full scroll.
-    Gradient now uses alpha masks so it works in all modes (crisp/smooth, with/without emojis).
-    """
+    color_rgb: Tuple[int,int,int],
+    shift_px: int,
+    direction: str,
+    crisp: bool,
+    center_when_short: bool,
+    color_mode: str,
+    gradient_preset: str,
+    gradient_reverse: bool,
+    gradient_shift_px: int,
+) -> bytes:
+    """Render one 64x16 frame for current scroll position and gradient shift."""
     W, H = MATRIX_W, MATRIX_H
     text_w = measure_text_width(text, font)
     y = center_y_for_text(text, font, H)
     use_pilmoji = contains_emoji(text)
 
-    frames: list[bytes] = []
-    delay = 1.0 / max(speed_px_per_sec, 1.0)
-
-    # --- Center-when-short path: frame-by-frame render at 64x16 ---
     if center_when_short and text_w < W:
         center_x = (W - text_w) // 2
-        total_shift = W + text_w
-        for s in range(0, total_shift):
-            x = center_x + (s if direction == "right" else -s)
-            if color_mode == "gradient":
-                mask = make_text_mask(W, H, x, y, text, font, use_pilmoji, crisp)
-                grad = make_horizontal_gradient(W, H, gradient_preset, gradient_reverse)
-                out = Image.new("RGB", (W, H), bg)
-                out.paste(grad, (0,0), mask)
-            else:
-                if crisp and not use_pilmoji:
-                    mask = make_text_mask(W, H, x, y, text, font, use_pilmoji=False, crisp=True)
-                    out = Image.new("RGB", (W, H), bg)
-                    out.paste(Image.new("RGB", (W, H), color_rgb), (0,0), mask)
-                else:
-                    out = Image.new("RGB", (W, H), bg)
-                    if use_pilmoji and PILMOJI_AVAILABLE:
-                        with Pilmoji(out) as pm:
-                            pm.text((x, y), text, font=font, fill=color_rgb)
-                    else:
-                        ImageDraw.Draw(out).text((x, y), text, font=font, fill=color_rgb)
-            frames.append(out.tobytes())
-        return frames, W, H, delay
-
-    # --- Wide-canvas path (text runs off the edge) ---
-    canvas_w = max(W, text_w + W)
+        x = center_x + (shift_px if direction == "right" else -shift_px)
+    else:
+        if direction == "left":
+            x = W - shift_px
+        else:
+            x = shift_px - text_w
 
     if color_mode == "gradient":
-        # Build a wide alpha mask and paste a wide gradient through it
-        mask = make_text_mask(canvas_w, H, W, y, text, font, use_pilmoji, crisp)
-        full_grad = make_horizontal_gradient(canvas_w, H, gradient_preset, gradient_reverse)
-        full_color = Image.new("RGB", (canvas_w, H), bg)
-        full_color.paste(full_grad, (0,0), mask)
+        mask = make_text_mask(W, H, x, y, text, font, use_pilmoji, crisp)
+        grad = make_horizontal_gradient(W, H, gradient_preset, gradient_reverse,
+                                        offset_px=gradient_shift_px, period_w=W)
+        out = Image.new("RGB", (W, H), (0,0,0))
+        out.paste(grad, (0,0), mask)
+        return out.tobytes()
+
+    if crisp and not use_pilmoji:
+        mask = make_text_mask(W, H, x, y, text, font, False, True)
+        out = Image.new("RGB", (W, H), (0,0,0))
+        out.paste(Image.new("RGB", (W, H), color_rgb), (0,0), mask)
     else:
-        full_color = Image.new("RGB", (canvas_w, H), bg)
-        if crisp and not use_pilmoji:
-            mask = make_text_mask(canvas_w, H, W, y, text, font, use_pilmoji=False, crisp=True)
-            solid = Image.new("RGB", (canvas_w, H), color_rgb)
-            full_color.paste(solid, (0,0), mask)
+        out = Image.new("RGB", (W, H), (0,0,0))
+        if use_pilmoji and PILMOJI_AVAILABLE:
+            with Pilmoji(out) as pm:
+                pm.text((x, y), text, font=font, fill=color_rgb)
         else:
-            if use_pilmoji and PILMOJI_AVAILABLE:
-                with Pilmoji(full_color) as pm:
-                    pm.text((W, y), text, font=font, fill=color_rgb)
-            else:
-                ImageDraw.Draw(full_color).text((W, y), text, font=font, fill=color_rgb)
-
-    if direction == "left":
-        for shift in range(0, W + text_w):
-            crop = full_color.crop((shift, 0, shift + W, H))
-            frames.append(crop.tobytes())
-    else:
-        for shift in range(0, W + text_w):
-            crop = full_color.crop((canvas_w - W - shift, 0, canvas_w - shift, H))
-            frames.append(crop.tobytes())
-
-    return frames, W, H, delay
+            ImageDraw.Draw(out).text((x, y), text, font=font, fill=color_rgb)
+    return out.tobytes()
 
 
 # =========================
@@ -357,7 +314,6 @@ def send_simple_udp_frame(sock: socket.socket, ip: str, port: int, rgb_bytes: by
 def send_wled_realtime_frame(sock: socket.socket, ip: str, port: int, rgb_bytes: bytes):
     sock.sendto(rgb_bytes, (ip, port))
 
-# DDP: chunked with PUSH-on-last
 def _ddp_header(offset_bytes: int, data_len: int, channel: int, seq: int, push: bool) -> bytes:
     flags = 0x01
     if push:
@@ -410,10 +366,10 @@ def scroller_worker(cfg: dict):
     port = int(cfg["port"])
     channel = int(cfg.get("ddp_channel", 1))
 
-    # color mode
     color_mode = cfg.get("color_mode", "solid")
     gradient_preset = cfg.get("gradient_preset", "rainbow")
     gradient_reverse = bool(cfg.get("gradient_reverse", False))
+    gradient_shift_speed = float(cfg.get("gradient_shift_speed", 0.0))
 
     try:
         font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
@@ -425,55 +381,78 @@ def scroller_worker(cfg: dict):
 
     try:
         if display_mode == "static":
-            frame = render_static_frame(
-                text, font, color,
-                bg=(0,0,0),
-                crisp=crisp,
-                color_mode=color_mode,
-                gradient_preset=gradient_preset,
-                gradient_reverse=gradient_reverse
-            )
-            frame = remap_serpentine(frame, MATRIX_W, MATRIX_H, serpentine)
-            keepalive = 0.5
+            # animate gradient by time
+            last = time.time()
+            grad_shift = 0.0
+            frame_interval = 1.0 / 30.0  # ~30 FPS for smooth gradient
             while not STOP_EVENT.is_set():
-                if mode == "ddp":
-                    send_ddp_frame(sock, ip, port, frame, channel=channel, seq=0)
-                elif mode == "wled_udp":
-                    send_wled_realtime_frame(sock, ip, port, frame)
-                else:
-                    send_simple_udp_frame(sock, ip, port, frame)
-                time.sleep(keepalive)
-            return
+                now = time.time()
+                dt = now - last
+                last = now
+                grad_shift = (grad_shift + gradient_shift_speed * dt) % MATRIX_W
 
-        frames, w, h, delay = render_scrolling_frames(
-            text=text,
-            font=font,
-            color_rgb=color,
-            speed_px_per_sec=speed,
-            direction=direction,
-            crisp=crisp,
-            center_when_short=center_short,
-            color_mode=color_mode,
-            gradient_preset=gradient_preset,
-            gradient_reverse=gradient_reverse,
-        )
-        while not STOP_EVENT.is_set():
-            for f in frames:
-                if STOP_EVENT.is_set():
-                    break
-                payload = remap_serpentine(f, w, h, serpentine)
+                frame = render_static_frame(
+                    text, font, color, bg=(0,0,0), crisp=crisp,
+                    color_mode=color_mode,
+                    gradient_preset=gradient_preset,
+                    gradient_reverse=gradient_reverse,
+                    gradient_shift_px=int(grad_shift)
+                )
+                payload = remap_serpentine(frame, MATRIX_W, MATRIX_H, serpentine)
                 if mode == "ddp":
                     send_ddp_frame(sock, ip, port, payload, channel=channel, seq=0)
                 elif mode == "wled_udp":
                     send_wled_realtime_frame(sock, ip, port, payload)
                 else:
                     send_simple_udp_frame(sock, ip, port, payload)
-                time.sleep(delay)
+                time.sleep(frame_interval)
+            return
+
+        # Scroll mode — generate window frames on the fly (supports animated gradient)
+        last = time.time()
+        grad_shift = 0.0
+        text_w = measure_text_width(text, font)
+        total_steps = (MATRIX_W + text_w)
+        step = 0
+        while not STOP_EVENT.is_set():
+            now = time.time()
+            dt = now - last
+            last = now
+
+            # advance scroll by converting speed (px/sec) to step timing
+            # we send frames at ~min( speed, 60 ) fps approximated by delay
+            delay = 1.0 / max(float(cfg.get("speed", 40.0)), 1.0)
+            grad_shift = (grad_shift + gradient_shift_speed * dt) % MATRIX_W
+
+            frame = render_scroll_window_frame(
+                text=text,
+                font=font,
+                color_rgb=color,
+                shift_px=step,
+                direction=direction,
+                crisp=crisp,
+                center_when_short=center_short,
+                color_mode=color_mode,
+                gradient_preset=gradient_preset,
+                gradient_reverse=gradient_reverse,
+                gradient_shift_px=int(grad_shift),
+            )
+            payload = remap_serpentine(frame, MATRIX_W, MATRIX_H, serpentine)
+            if mode == "ddp":
+                send_ddp_frame(sock, ip, port, payload, channel=channel, seq=0)
+            elif mode == "wled_udp":
+                send_wled_realtime_frame(sock, ip, port, payload)
+            else:
+                send_simple_udp_frame(sock, ip, port, payload)
+
+            time.sleep(delay)
+            step += 1
+            if step >= total_steps:
+                step = 0
+
     finally:
-        try:
-            sock.close()
-        except Exception:
-            pass
+        try: sock.close()
+        except Exception: pass
 
 
 # =========================
@@ -505,6 +484,7 @@ def start():
     color_mode = str(payload.get("color_mode", "solid"))
     gradient_preset = str(payload.get("gradient_preset", "rainbow"))
     gradient_reverse = bool(payload.get("gradient_reverse", False))
+    gradient_shift_speed = float(payload.get("gradient_shift_speed", 0.0))
 
     speed = float(payload.get("speed", 40.0))
     direction = str(payload.get("direction", "left")).lower()
@@ -527,6 +507,7 @@ def start():
         "color_mode": color_mode,
         "gradient_preset": gradient_preset,
         "gradient_reverse": gradient_reverse,
+        "gradient_shift_speed": gradient_shift_speed,
         "speed": speed,
         "direction": direction,
         "serpentine": serpentine,
