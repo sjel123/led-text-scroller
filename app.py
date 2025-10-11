@@ -16,7 +16,7 @@ except Exception:
     PILMOJI_AVAILABLE = False
 
 try:
-    import emoji as emoji_lib  # pin emoji==1.7.0 for Pilmoji compatibility
+    import emoji as emoji_lib  # use emoji==1.7.0 with Pilmoji
     EMOJI_AVAILABLE = True
 except Exception:
     EMOJI_AVAILABLE = False
@@ -75,28 +75,14 @@ def list_system_fonts() -> List[Tuple[str, str]]:
                     continue
                 seen.add(key)
                 fonts.append((display, p))
+    # Prefer Arial Unicode near top
     fonts.sort(key=lambda x: (0 if "arial unicode" in x[0].lower() else 1, x[0].lower()))
     return fonts
 
 
 # =========================
-# TEXT METRICS
+# EMOJI / METRICS HELPERS
 # =========================
-def measure_text_bbox_pil(text: str, font: ImageFont.FreeTypeFont) -> Tuple[int, int, int, int]:
-    tmp = Image.new("L", (2, 2), 0)
-    d = ImageDraw.Draw(tmp)
-    return d.textbbox((0, 0), text, font=font)
-
-def center_y_for_text(text: str, font: ImageFont.FreeTypeFont, canvas_h: int) -> int:
-    l, t, r, b = measure_text_bbox_pil(text, font)
-    text_h = max(0, b - t)
-    return (canvas_h - text_h) // 2 - t
-
-def measure_text_width(text: str, font: ImageFont.FreeTypeFont) -> int:
-    tmp = Image.new("RGB", (1, 1))
-    d = ImageDraw.Draw(tmp)
-    return int(d.textlength(text, font=font))
-
 def contains_emoji(s: str) -> bool:
     if not EMOJI_AVAILABLE:
         return False
@@ -105,6 +91,50 @@ def contains_emoji(s: str) -> bool:
     except Exception:
         return False
 
+def _pil_textbbox(text: str, font: ImageFont.FreeTypeFont) -> Tuple[int,int,int,int]:
+    tmp = Image.new("L", (2, 2), 0)
+    d = ImageDraw.Draw(tmp)
+    return d.textbbox((0, 0), text, font=font)
+
+def _approx_pil_width(text: str, font: ImageFont.FreeTypeFont) -> int:
+    tmp = Image.new("RGB", (1, 1))
+    d = ImageDraw.Draw(tmp)
+    return int(d.textlength(text, font=font))
+
+def measure_bbox(text: str, font: ImageFont.FreeTypeFont) -> Tuple[int,int,int,int]:
+    """
+    Returns (l,t,r,b) of what will actually be drawn.
+    If text contains emoji and Pilmoji is available, render offscreen with Pilmoji
+    and compute bbox from the alpha channel (true drawn bounds). Otherwise use PIL.
+    """
+    if contains_emoji(text) and PILMOJI_AVAILABLE:
+        approx_w = max(MATRIX_W*3, _approx_pil_width(text, font) + font.size*2)
+        approx_h = max(MATRIX_H*2, int(font.size*2))
+        rgba = Image.new("RGBA", (approx_w, approx_h), (0,0,0,0))
+        with Pilmoji(rgba) as pm:
+            pm.text((0, 0), text, font=font, fill=(255,255,255,255))
+        a = rgba.split()[-1]
+        bbox = a.getbbox()
+        return bbox if bbox else (0,0,0,0)
+    else:
+        return _pil_textbbox(text, font)
+
+def measure_text_width(text: str, font: ImageFont.FreeTypeFont) -> int:
+    l, t, r, b = measure_bbox(text, font)
+    return max(0, r - l)
+
+def center_y_for_text(text: str, font: ImageFont.FreeTypeFont, canvas_h: int, emoji_baseline_offset: int = 0) -> int:
+    """
+    Vertically center using the renderer's bbox. If the text contains emoji,
+    apply a user-provided baseline offset (px). Positive = move down.
+    """
+    l, t, r, b = measure_bbox(text, font)
+    text_h = max(0, b - t)
+    y = (canvas_h - text_h) // 2 - t
+    if contains_emoji(text):
+        y += int(emoji_baseline_offset)
+    return y
+
 
 # =========================
 # COLOR / GRADIENTS
@@ -112,9 +142,7 @@ def contains_emoji(s: str) -> bool:
 def hsv_to_rgb(h: float, s: float, v: float) -> Tuple[int,int,int]:
     i = int(h*6.0)
     f = h*6.0 - i
-    p = v*(1.0-s)
-    q = v*(1.0-f*s)
-    t = v*(1.0-(1.0-f)*s)
+    p = v*(1.0-s); q = v*(1.0-f*s); t = v*(1.0-(1.0-f)*s)
     i = i % 6
     if i == 0: r,g,b = v,t,p
     elif i == 1: r,g,b = q,v,p
@@ -159,12 +187,12 @@ def make_horizontal_gradient(width: int, height: int, preset: str, reverse: bool
     px = img.load()
     period = period_w if period_w and period_w > 0 else width
     for x in range(width):
-      xx = (x + offset_px) % period
-      t = xx / float(max(1, period - 1))
-      if reverse: t = 1.0 - t
-      col = gradient_preset_color(t, preset)
-      for y in range(height):
-        px[x,y] = col
+        xx = (x + offset_px) % period
+        t = xx / float(max(1, period - 1))
+        if reverse: t = 1.0 - t
+        col = gradient_preset_color(t, preset)
+        for y in range(height):
+            px[x,y] = col
     return img
 
 
@@ -175,14 +203,10 @@ def make_text_mask(canvas_w: int, canvas_h: int, x: int, y: int,
                    text: str, font: ImageFont.FreeTypeFont,
                    use_pilmoji: bool, crisp: bool) -> Image.Image:
     """Return 'L' mask for text/emoji. If crisp, threshold to 1-bit edges."""
-    if use_pilmoji:
+    if use_pilmoji and PILMOJI_AVAILABLE:
         rgba = Image.new("RGBA", (canvas_w, canvas_h), (0,0,0,0))
-        if PILMOJI_AVAILABLE:
-            with Pilmoji(rgba) as pm:
-                pm.text((x, y), text, font=font, fill=(255,255,255,255))
-        else:
-            d = ImageDraw.Draw(rgba)
-            d.text((x, y), text, font=font, fill=(255,255,255,255))
+        with Pilmoji(rgba) as pm:
+            pm.text((x, y), text, font=font, fill=(255,255,255,255))
         mask = rgba.split()[-1]
     else:
         mask = Image.new("L", (canvas_w, canvas_h), 0)
@@ -205,11 +229,12 @@ def render_static_frame(
     gradient_preset: str = "rainbow",
     gradient_reverse: bool = False,
     gradient_shift_px: int = 0,
+    emoji_baseline_offset: int = 0,
 ) -> bytes:
     W, H = MATRIX_W, MATRIX_H
     text_w = measure_text_width(text, font)
     x = (W - text_w) // 2
-    y = center_y_for_text(text, font, H)
+    y = center_y_for_text(text, font, H, emoji_baseline_offset)
     use_pilmoji = contains_emoji(text)
 
     if color_mode == "gradient":
@@ -219,7 +244,7 @@ def render_static_frame(
         out.paste(grad, (0,0), mask)
         return out.tobytes()
 
-    if crisp and not use_pilmoji:
+    if crisp and not (use_pilmoji and PILMOJI_AVAILABLE):
         mask = make_text_mask(W, H, x, y, text, font, False, True)
         out = Image.new("RGB", (W, H), bg)
         out.paste(Image.new("RGB", (W, H), color_rgb), (0,0), mask)
@@ -245,11 +270,12 @@ def render_scroll_window_frame(
     gradient_preset: str,
     gradient_reverse: bool,
     gradient_shift_px: int,
+    emoji_baseline_offset: int,
 ) -> bytes:
     """Render one 64x16 frame for current scroll position and gradient shift."""
     W, H = MATRIX_W, MATRIX_H
     text_w = measure_text_width(text, font)
-    y = center_y_for_text(text, font, H)
+    y = center_y_for_text(text, font, H, emoji_baseline_offset)
     use_pilmoji = contains_emoji(text)
 
     if center_when_short and text_w < W:
@@ -269,7 +295,7 @@ def render_scroll_window_frame(
         out.paste(grad, (0,0), mask)
         return out.tobytes()
 
-    if crisp and not use_pilmoji:
+    if crisp and not (use_pilmoji and PILMOJI_AVAILABLE):
         mask = make_text_mask(W, H, x, y, text, font, False, True)
         out = Image.new("RGB", (W, H), (0,0,0))
         out.paste(Image.new("RGB", (W, H), color_rgb), (0,0), mask)
@@ -370,6 +396,7 @@ def scroller_worker(cfg: dict):
     gradient_preset = cfg.get("gradient_preset", "rainbow")
     gradient_reverse = bool(cfg.get("gradient_reverse", False))
     gradient_shift_speed = float(cfg.get("gradient_shift_speed", 0.0))
+    emoji_baseline_offset = int(cfg.get("emoji_baseline_offset", 0))
 
     try:
         font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
@@ -384,7 +411,7 @@ def scroller_worker(cfg: dict):
             # animate gradient by time
             last = time.time()
             grad_shift = 0.0
-            frame_interval = 1.0 / 30.0  # ~30 FPS for smooth gradient
+            frame_interval = 1.0 / 30.0  # ~30 FPS
             while not STOP_EVENT.is_set():
                 now = time.time()
                 dt = now - last
@@ -396,7 +423,8 @@ def scroller_worker(cfg: dict):
                     color_mode=color_mode,
                     gradient_preset=gradient_preset,
                     gradient_reverse=gradient_reverse,
-                    gradient_shift_px=int(grad_shift)
+                    gradient_shift_px=int(grad_shift),
+                    emoji_baseline_offset=emoji_baseline_offset
                 )
                 payload = remap_serpentine(frame, MATRIX_W, MATRIX_H, serpentine)
                 if mode == "ddp":
@@ -408,7 +436,7 @@ def scroller_worker(cfg: dict):
                 time.sleep(frame_interval)
             return
 
-        # Scroll mode — generate window frames on the fly (supports animated gradient)
+        # Scroll mode — render window frames on the fly
         last = time.time()
         grad_shift = 0.0
         text_w = measure_text_width(text, font)
@@ -419,8 +447,6 @@ def scroller_worker(cfg: dict):
             dt = now - last
             last = now
 
-            # advance scroll by converting speed (px/sec) to step timing
-            # we send frames at ~min( speed, 60 ) fps approximated by delay
             delay = 1.0 / max(float(cfg.get("speed", 40.0)), 1.0)
             grad_shift = (grad_shift + gradient_shift_speed * dt) % MATRIX_W
 
@@ -436,6 +462,7 @@ def scroller_worker(cfg: dict):
                 gradient_preset=gradient_preset,
                 gradient_reverse=gradient_reverse,
                 gradient_shift_px=int(grad_shift),
+                emoji_baseline_offset=emoji_baseline_offset,
             )
             payload = remap_serpentine(frame, MATRIX_W, MATRIX_H, serpentine)
             if mode == "ddp":
@@ -497,6 +524,8 @@ def start():
     display_mode = str(payload.get("display_mode", "scroll")).lower()
     center_short = bool(payload.get("center_short", False))
 
+    emoji_baseline_offset = int(payload.get("emoji_baseline_offset", 0))
+
     stop_worker()
 
     cfg = {
@@ -518,6 +547,7 @@ def start():
         "crisp": crisp,
         "display_mode": display_mode,
         "center_short": center_short,
+        "emoji_baseline_offset": emoji_baseline_offset,
     }
 
     with STATE_LOCK:

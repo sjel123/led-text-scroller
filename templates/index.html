@@ -57,7 +57,7 @@
         <button id="previewReset" class="secondary">Reset</button>
       </div>
     </div>
-    <div class="hint">Crisp = hard 1-bit edges (matches LED “crisp” mode). Static display is centered. Gradients apply in crisp & smooth, with emojis.</div>
+    <div class="hint">Crisp = 1-bit edges. Static display is centered. Gradients & emojis preview accurately.</div>
   </div>
 
   <!-- Controls -->
@@ -77,14 +77,24 @@
           >{{name}}</option>
           {% endfor %}
         </select>
-        <div class="hint">Uses macOS fonts from /System/Library/Fonts, /Library/Fonts, and ~/Library/Fonts.</div>
+        <div class="hint">macOS fonts from /System/Library/Fonts, /Library/Fonts, and ~/Library/Fonts.</div>
       </div>
       <div>
         <label for="fontSize">Font size (px)</label>
         <input id="fontSize" type="number" min="6" max="64" value="16" />
       </div>
+      <div>
+        <label for="emojiBaseline">Emoji baseline offset (px)</label>
+        <input id="emojiBaseline" type="number" step="1" value="0" />
+        <div class="hint">Positive = move emojis down, Negative = up (only affects lines that contain emoji).</div>
+      </div>
+      <div>
+        <label for="speed">Speed (pixels/sec)</label>
+        <input id="speed" type="number" min="1" max="200" value="40" />
+      </div>
+    </div>
 
-      <!-- Color / Gradient controls -->
+    <div class="row">
       <div>
         <label for="colorMode">Color mode</label>
         <select id="colorMode">
@@ -114,16 +124,9 @@
             <input id="gradientShift" type="number" step="1" value="0" />
           </div>
         </div>
-        <div class="hint">Animate the gradient horizontally at the given pixels/second.</div>
+        <div class="hint">Animate the gradient horizontally.</div>
       </div>
 
-      <div>
-        <label for="speed">Speed (pixels/sec)</label>
-        <input id="speed" type="number" min="1" max="200" value="40" />
-      </div>
-    </div>
-
-    <div class="row">
       <div>
         <label for="displayMode">Display</label>
         <select id="displayMode">
@@ -139,19 +142,19 @@
         </select>
       </div>
       <div>
-        <label for="layout">Layout</label>
+        <label for="layout">Layouts</label>
         <select id="layout">
           <option value="serpentine">Zig-zag (serpentine)</option>
-          <option value="progressive" selected>Progressive (left→right each row)</option>
+          <option value="progressive" selected>Progressiv (left→right each row)</option>
         </select>
-        <div class="hint">Layout affects <b>sending</b> order only (wiring). Preview shows the visual frame.</div>
+        <div class="hint">Affects send order only (wiring). Preview shows the visual frame.</div>
       </div>
       <div>
         <label for="mode">Output mode</label>
         <select id="mode">
-          <option value="simple">Simple UDP (custom, 7777)</option>
+          <option value="simple">Simple UDP (7777)</option>
           <option value="ddp" selected>DDP (4048)</option>
-          <option value="wled_udp">WLED UDP (Realtime, 21324)</option>
+          <option value="wled_udp">WLED UDP (21324)</option>
         </select>
       </div>
       <div>
@@ -166,7 +169,7 @@
       <div>
         <label for="ddpChannel">DDP Channel</label>
         <input id="ddpChannel" type="number" min="1" max="255" value="1" />
-        <div class="hint">Only used in DDP mode.</div>
+        <div class="hint">DDP only.</div>
       </div>
     </div>
 
@@ -177,92 +180,38 @@
   </div>
 
   <script>
-    // ---------- constants ----------
     const MAT_W = 64, MAT_H = 16;
 
-    // ---------- helpers ----------
     function hexToRgb(hex){
-      const v = hex.replace("#","")
-      return [parseInt(v.slice(0,2),16), parseInt(v.slice(2,4),16), parseInt(v.slice(4,6),16)]
+      const v = hex.replace("#","");
+      return [parseInt(v.slice(0,2),16), parseInt(v.slice(2,4),16), parseInt(v.slice(4,6),16)];
     }
     function clamp01(x){ return Math.max(0, Math.min(1, x)); }
-
     function hsvToRgb(h, s, v){
-      let r=0,g=0,b=0;
-      let i = Math.floor(h*6);
-      let f = h*6 - i;
-      let p = v*(1-s);
-      let q = v*(1-f*s);
-      let t = v*(1-(1-f)*s);
-      switch(i%6){
-        case 0: r=v,g=t,b=p; break;
-        case 1: r=q,g=v,b=p; break;
-        case 2: r=p,g=v,b=t; break;
-        case 3: r=p,g=q,b=v; break;
-        case 4: r=t,g=p,b=v; break;
-        case 5: r=v,g=p,b=q; break;
-      }
-      return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
+      let r=0,g=0,b=0; let i = Math.floor(h*6); let f = h*6 - i;
+      let p=v*(1-s), q=v*(1-f*s), t=v*(1-(1-f)*s);
+      switch(i%6){ case 0:r=v;g=t;b=p;break; case 1:r=q;g=v;b=p;break; case 2:r=p;g=v;b=t;break;
+        case 3:r=p;g=q;b=v;break; case 4:r=t;g=p;b=v;break; case 5:r=v;g=p;b=q;break; }
+      return [Math.round(r*255),Math.round(g*255),Math.round(b*255)];
     }
-
     function lerp(a,b,t){ return a + (b-a)*t; }
-    function lerpRgb(a,b,t){
-      return [Math.round(lerp(a[0],b[0],t)), Math.round(lerp(a[1],b[1],t)), Math.round(lerp(a[2],b[2],t))];
-    }
+    function lerpRgb(a,b,t){ return [Math.round(lerp(a[0],b[0],t)),Math.round(lerp(a[1],b[1],t)),Math.round(lerp(a[2],b[2],t))]; }
+    function hasEmoji(s){ try { return /[\p{Extended_Pictographic}]/u.test(s); } catch(e){ return false; } }
 
-    // Gradient palette
-    function gradientPresetColor(t, preset){
+    function gradientPresetColor(t,preset){
       t = clamp01(t);
-      if(preset === "rainbow"){
-        return hsvToRgb(t, 1, 1);
+      if(preset === "rainbow") return hsvToRgb(t,1,1);
+      const map = {
+        fire: {stops:[[0,0,0],[120,0,0],[220,40,0],[255,140,0],[255,220,0],[255,255,255]], pos:[0,0.15,0.35,0.60,0.85,1]},
+        ocean:{stops:[[0,10,40],[0,90,160],[0,180,255],[120,220,255]],pos:[0,0.4,0.8,1]},
+        sunset:{stops:[[120,0,80],[200,40,0],[255,120,0],[255,220,120]],pos:[0,0.35,0.7,1]},
+        ice:{stops:[[255,255,255],[200,240,255],[160,220,255],[120,200,255],[80,180,255]],pos:[0,0.25,0.5,0.75,1]}
+      };
+      const g = map[preset]; if(!g) return [255,255,255];
+      for(let i=0;i<g.pos.length-1;i++){
+        if(t>=g.pos[i] && t<=g.pos[i+1]){ const lt=(t-g.pos[i])/(g.pos[i+1]-g.pos[i]); return lerpRgb(g.stops[i],g.stops[i+1],lt); }
       }
-      if(preset === "fire"){
-        const stops = [
-          [0,0,0], [120,0,0], [220,40,0], [255,140,0], [255,220,0], [255,255,255]
-        ];
-        const pos = [0.00, 0.15, 0.35, 0.60, 0.85, 1.00];
-        for(let i=0;i<pos.length-1;i++){
-          if(t>=pos[i] && t<=pos[i+1]){ 
-            const lt=(t-pos[i])/(pos[i+1]-pos[i]);
-            return lerpRgb(stops[i], stops[i+1], lt);
-          }
-        }
-        return stops[stops.length-1];
-      }
-      if(preset === "ocean"){
-        const stops = [[0,10,40],[0,90,160],[0,180,255],[120,220,255]];
-        const pos   = [0.0, 0.4, 0.8, 1.0];
-        for(let i=0;i<pos.length-1;i++){
-          if(t>=pos[i] && t<=pos[i+1]){
-            const lt=(t-pos[i])/(pos[i+1]-pos[i]);
-            return lerpRgb(stops[i], stops[i+1], lt);
-          }
-        }
-        return stops[stops.length-1];
-      }
-      if(preset === "sunset"){
-        const stops = [[120,0,80],[200,40,0],[255,120,0],[255,220,120]];
-        const pos   = [0.0, 0.35, 0.7, 1.0];
-        for(let i=0;i<pos.length-1;i++){
-          if(t>=pos[i] && t<=pos[i+1]){
-            const lt=(t-pos[i])/(pos[i+1]-pos[i]);
-            return lerpRgb(stops[i], stops[i+1], lt);
-          }
-        }
-        return stops[stops.length-1];
-      }
-      if(preset === "ice"){
-        const stops = [[255,255,255],[200,240,255],[160,220,255],[120,200,255],[80,180,255]];
-        const pos   = [0.0, 0.25, 0.5, 0.75, 1.0];
-        for(let i=0;i<pos.length-1;i++){
-          if(t>=pos[i] && t<=pos[i+1]){
-            const lt=(t-pos[i])/(pos[i+1]-pos[i]);
-            return lerpRgb(stops[i], stops[i+1], lt);
-          }
-        }
-        return stops[stops.length-1];
-      }
-      return [255,255,255];
+      return g.stops[g.stops.length-1];
     }
 
     function updateColorModeUI(){
@@ -279,7 +228,6 @@
       if(mode === "ddp" && (!portInput.value || ["7777","21324"].includes(portInput.value)))  portInput.value = "{{ default_ddp_port or 4048 }}";
       if(mode === "wled_udp" && (!portInput.value || ["7777","4048"].includes(portInput.value))) portInput.value = "21324";
     }
-    document.getElementById("mode").addEventListener("change", updatePortHelper)
 
     function updateDisplayModeUI(){
       const disp = document.getElementById("displayMode").value
@@ -306,16 +254,14 @@
     const gradientReverseInput = document.getElementById("gradientReverse")
     const gradientShiftInput = document.getElementById("gradientShift")
 
+    const emojiBaselineInput = document.getElementById("emojiBaseline")
+
     const previewPlayBtn = document.getElementById("previewPlay")
     const previewPauseBtn = document.getElementById("previewPause")
     const previewResetBtn = document.getElementById("previewReset")
 
-    let animReq = null
-    let shift = 0
-    let maxShift = 0
-    let lastTs = 0
+    let animReq = null, shift = 0, maxShift = 0, lastTs = 0, gradShift = 0
 
-    let gradShift = 0  // pixels
     function currentFontCSS(){
       const sel = document.getElementById("fontSelect")
       const opt = sel.options[sel.selectedIndex]
@@ -323,76 +269,63 @@
       const size = parseInt(document.getElementById("fontSize").value,10) || 16
       return `${size}px "${name}", "Apple Color Emoji", "Segoe UI Emoji", emoji, sans-serif`
     }
-
     function measureTextWidth(text, fontCSS){
-      ctx.save()
-      ctx.font = fontCSS
-      const w = ctx.measureText(text).width
-      ctx.restore()
-      return Math.max(0, Math.floor(w))
+      ctx.save(); ctx.font = fontCSS; const w = ctx.measureText(text).width; ctx.restore(); return Math.max(0, Math.floor(w))
     }
-
     function applyScale(){
       const s = Math.max(4, Math.min(40, parseInt(scaleInput.value,10)||12))
       cvs.style.width = (MAT_W * s) + "px"
       cvs.style.height = (MAT_H * s) + "px"
     }
-
     function drawGrid(){
-      ctx.save()
-      ctx.strokeStyle = "rgba(255,255,255,0.08)"
-      ctx.lineWidth = 1
-      for(let x=1; x<MAT_W; x++){
-        ctx.beginPath(); ctx.moveTo(x+0.5, 0); ctx.lineTo(x+0.5, MAT_H); ctx.stroke()
-      }
-      for(let y=1; y<MAT_H; y++){
-        ctx.beginPath(); ctx.moveTo(0, y+0.5); ctx.lineTo(MAT_W, y+0.5); ctx.stroke()
-      }
+      ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.lineWidth = 1
+      for(let x=1; x<MAT_W; x++){ ctx.beginPath(); ctx.moveTo(x+0.5, 0); ctx.lineTo(x+0.5, MAT_H); ctx.stroke() }
+      for(let y=1; y<MAT_H; y++){ ctx.beginPath(); ctx.moveTo(0, y+0.5); ctx.lineTo(MAT_W, y+0.5); ctx.stroke() }
       ctx.restore()
     }
 
-    // recolor white text to gradient across [0..W) with shift offset
     function recolorWithGradient(ctx, w, h, preset, reversed, shiftPx){
       const img = ctx.getImageData(0,0,w,h)
-      const d = img.data
-      const period = w
+      const d = img.data, period = w
       for(let y=0;y<h;y++){
         for(let x=0;x<w;x++){
           const i = (y*w + x)*4
           const lum = (d[i]*0.2126 + d[i+1]*0.7152 + d[i+2]*0.0722)
           if(lum >= 128){
-            let xx = (x + Math.floor(shiftPx)) % period
-            if(xx < 0) xx += period
-            let t = xx / (period - 1 || 1)
-            if(reversed) t = 1 - t
+            let xx = (x + Math.floor(shiftPx)) % period; if(xx < 0) xx += period
+            let t = xx / (period - 1 || 1); if(reversed) t = 1 - t
             const [r,g,b] = gradientPresetColor(t, preset)
-            d[i] = r; d[i+1] = g; d[i+2] = b; d[i+3] = 255
-          }else{
-            d[i] = 0; d[i+1] = 0; d[i+2] = 0; d[i+3] = 255
+            d[i]=r; d[i+1]=g; d[i+2]=b; d[i+3]=255
+          } else {
+            d[i]=0; d[i+1]=0; d[i+2]=0; d[i+3]=255
           }
         }
       }
       ctx.putImageData(img,0,0)
     }
+    function thresholdAndRecolor(ctx, w, h, hexColor){
+      const [rC,gC,bC] = hexToRgb(hexColor)
+      const img = ctx.getImageData(0,0,w,h), d = img.data
+      for(let i=0;i<d.length;i+=4){
+        const lum = (d[i]*0.2126 + d[i+1]*0.7152 + d[i+2]*0.0722)
+        if(lum >= 128){ d[i]=rC; d[i+1]=gC; d[i+2]=bC; d[i+3]=255 } else { d[i]=0; d[i+1]=0; d[i+2]=0; d[i+3]=255 }
+      }
+      ctx.putImageData(img,0,0)
+    }
 
     function recalcPreview(){
-      shift = 0
-      gradShift = 0
-      lastTs = 0
+      shift = 0; gradShift = 0; lastTs = 0
       const text = document.getElementById("text").value
       const fontCSS = currentFontCSS()
       const textW = measureTextWidth(text, fontCSS)
       const disp = document.getElementById("displayMode").value
       maxShift = (disp === "static") ? 0 : (MAT_W + textW)
-      applyScale()
-      drawFrame(0)
+      applyScale(); drawFrame(0)
     }
 
     function drawFrame(shiftPx){
-      ctx.save()
-      ctx.imageSmoothingEnabled = false
-      ctx.fillStyle = "black"
-      ctx.fillRect(0,0,MAT_W,MAT_H)
+      ctx.save(); ctx.imageSmoothingEnabled = false
+      ctx.fillStyle="black"; ctx.fillRect(0,0,MAT_W,MAT_H)
 
       const text = document.getElementById("text").value
       const dir = document.getElementById("direction").value
@@ -404,149 +337,61 @@
       const preset = gradientPresetInput.value
       const reversed = !!gradientReverseInput.checked
       const solidHex = solidColorInput.value
+      const emojiOffset = parseInt(emojiBaselineInput.value, 10) || 0
+      const emojiPresent = hasEmoji(text)
 
-      ctx.font = fontCSS
-      ctx.textBaseline = "alphabetic"
+      ctx.font = fontCSS; ctx.textBaseline = "alphabetic"
       const metrics = ctx.measureText(text)
       const ascent  = metrics.actualBoundingBoxAscent || (size * 0.8)
       const descent = metrics.actualBoundingBoxDescent || (size * 0.2)
       const textH   = Math.ceil(ascent + descent)
-      const baselineY = Math.floor((MAT_H - textH) / 2 + ascent)
+      let baselineY = Math.floor((MAT_H - textH) / 2 + ascent)
+      if (emojiPresent) baselineY += emojiOffset
+
       const textW = measureTextWidth(text, fontCSS)
       const centerX = Math.floor((MAT_W - textW)/2)
 
       if (disp === "static") {
         const x = centerX
-        if (isCrisp) {
-          ctx.fillStyle = "#ffffff"
-          ctx.fillText(text, x, baselineY)
-          if(isGradient){
-            recolorWithGradient(ctx, MAT_W, MAT_H, preset, reversed, gradShift)
-          } else {
-            thresholdAndRecolor(ctx, MAT_W, MAT_H, solidHex)
-          }
-        } else {
-          // smooth: composite solid only in preview
-          if(isGradient){
-            ctx.fillStyle = "#ffffff"; ctx.fillText(text, x, baselineY)
-            recolorWithGradient(ctx, MAT_W, MAT_H, preset, reversed, gradShift)
-          } else {
-            ctx.fillStyle = solidHex; ctx.fillText(text, x, baselineY)
-          }
-        }
+        ctx.fillStyle = "#ffffff"; ctx.fillText(text, x, baselineY)
+        if(isGradient){ recolorWithGradient(ctx, MAT_W, MAT_H, preset, reversed, gradShift) }
+        else if(isCrisp){ thresholdAndRecolor(ctx, MAT_W, MAT_H, solidHex) }
       } else {
         const sPx = Math.floor(shiftPx)
         const useCenterShort = !!centerShortInput.checked && (textW < MAT_W)
-
-        if (isCrisp) {
-          ctx.fillStyle = "#ffffff"
-          if(useCenterShort){
-            ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-            const delta = (dir === "left" ? -sPx : sPx)
-            ctx.fillText(text, centerX + delta, baselineY)
-            ctx.restore()
-          } else {
-            if(dir === "left"){
-              ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-              ctx.translate(-sPx,0)
-              ctx.fillText(text, MAT_W, baselineY)
-              ctx.restore()
-            } else {
-              const canvasW = Math.max(MAT_W, textW + MAT_W)
-              ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-              ctx.translate(canvasW - MAT_W - sPx, 0)
-              ctx.fillText(text, 0, baselineY)
-              ctx.restore()
-            }
-          }
-          if(isGradient){
-            recolorWithGradient(ctx, MAT_W, MAT_H, preset, reversed, gradShift)
-          } else {
-            thresholdAndRecolor(ctx, MAT_W, MAT_H, solidHex)
-          }
+        ctx.fillStyle = "#ffffff"
+        if(useCenterShort){
+          const delta = (dir === "left" ? -sPx : sPx)
+          ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+          ctx.fillText(text, centerX + delta, baselineY)
+          ctx.restore()
         } else {
-          // smooth: allow gradient too by recoloring alpha'd text
-          if(isGradient){
-            ctx.fillStyle = "#ffffff"
-            if(useCenterShort){
-              const delta = (dir === "left" ? -sPx : sPx)
-              ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-              ctx.fillText(text, centerX + delta, baselineY)
-              ctx.restore()
-            } else {
-              if(dir === "left"){
-                ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-                ctx.translate(-sPx,0)
-                ctx.fillText(text, MAT_W, baselineY)
-                ctx.restore()
-              } else {
-                const canvasW = Math.max(MAT_W, textW + MAT_W)
-                ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-                ctx.translate(canvasW - MAT_W - sPx, 0)
-                ctx.fillText(text, 0, baselineY)
-                ctx.restore()
-              }
-            }
-            recolorWithGradient(ctx, MAT_W, MAT_H, preset, reversed, gradShift)
+          if(dir === "left"){
+            ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+            ctx.translate(-sPx,0); ctx.fillText(text, MAT_W, baselineY); ctx.restore()
           } else {
-            ctx.fillStyle = solidHex
-            if(useCenterShort){
-              const delta = (dir === "left" ? -sPx : sPx)
-              ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-              ctx.fillText(text, centerX + delta, baselineY)
-              ctx.restore()
-            } else {
-              if(dir === "left"){
-                ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-                ctx.translate(-sPx,0)
-                ctx.fillText(text, MAT_W, baselineY)
-                ctx.restore()
-              } else {
-                const canvasW = Math.max(MAT_W, textW + MAT_W)
-                ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
-                ctx.translate(canvasW - MAT_W - sPx, 0)
-                ctx.fillText(text, 0, baselineY)
-                ctx.restore()
-              }
-            }
+            const canvasW = Math.max(MAT_W, textW + MAT_W)
+            ctx.save(); ctx.beginPath(); ctx.rect(0,0,MAT_W,MAT_H); ctx.clip()
+            ctx.translate(canvasW - MAT_W - sPx, 0); ctx.fillText(text, 0, baselineY); ctx.restore()
           }
         }
+        if(isGradient){ recolorWithGradient(ctx, MAT_W, MAT_H, preset, reversed, gradShift) }
+        else if(isCrisp){ thresholdAndRecolor(ctx, MAT_W, MAT_H, solidHex) }
       }
 
       if(gridInput.checked) drawGrid()
       ctx.restore()
     }
 
-    // crisp recolor helper (solid)
-    function thresholdAndRecolor(ctx, w, h, hexColor){
-      const [rC,gC,bC] = hexToRgb(hexColor)
-      const img = ctx.getImageData(0,0,w,h)
-      const d = img.data
-      for(let i=0;i<d.length;i+=4){
-        const lum = (d[i]*0.2126 + d[i+1]*0.7152 + d[i+2]*0.0722)
-        if(lum >= 128){
-          d[i]=rC; d[i+1]=gC; d[i+2]=bC; d[i+3]=255
-        }else{
-          d[i]=0; d[i+1]=0; d[i+2]=0; d[i+3]=255
-        }
-      }
-      ctx.putImageData(img,0,0)
-    }
-
     function animatePreview(ts){
       const disp = document.getElementById("displayMode").value
       if(!lastTs) lastTs = ts
-      const dt = (ts - lastTs) / 1000.0
-      lastTs = ts
+      const dt = (ts - lastTs) / 1000.0; lastTs = ts
 
-      // text scroll
       if (disp === "scroll") {
         const speed = Math.max(1, parseFloat(document.getElementById("speed").value)||40)
-        shift += speed * dt
-        if(shift >= maxShift) shift = 0
+        shift += speed * dt; if(shift >= maxShift) shift = 0
       }
-
-      // gradient shift
       const gspd = parseFloat(gradientShiftInput.value)||0
       gradShift = (gradShift + gspd * dt) % MAT_W
 
@@ -555,47 +400,24 @@
     }
 
     // UI bindings
-    document.getElementById("previewPlay").addEventListener("click", () => {
-      if(animReq) return
-      recalcPreview()
-      animReq = requestAnimationFrame(animatePreview)
-    })
-    document.getElementById("previewPause").addEventListener("click", () => {
-      if(animReq){ cancelAnimationFrame(animReq); animReq = null }
-    })
-    document.getElementById("previewReset").addEventListener("click", () => {
-      if(animReq){ cancelAnimationFrame(animReq); animReq = null }
-      recalcPreview()
-    })
+    document.getElementById("previewPlay").addEventListener("click", () => { if(animReq) return; recalcPreview(); animReq = requestAnimationFrame(animatePreview) })
+    document.getElementById("previewPause").addEventListener("click", () => { if(animReq){ cancelAnimationFrame(animReq); animReq=null } })
+    document.getElementById("previewReset").addEventListener("click", () => { if(animReq){ cancelAnimationFrame(animReq); animReq=null } recalcPreview() })
 
-    ;["text","fontSelect","fontSize","speed","direction","crisp","displayMode","centerShort","colorMode","color","gradientPreset","gradientReverse","gradientShift"].forEach(id => {
+    ;["text","fontSelect","fontSize","speed","direction","crisp","displayMode","centerShort","colorMode","color","gradientPreset","gradientReverse","gradientShift","emojiBaseline"].forEach(id => {
       const el = document.getElementById(id)
-      el.addEventListener("change", () => { 
-        if(id==="colorMode") updateColorModeUI();
-        if(!animReq) recalcPreview();
-      })
-      el.addEventListener("input", () => { if(!animReq) recalcPreview() })
+      el.addEventListener("change", () => { if(id==="colorMode") updateColorModeUI(); if(!animReq) recalcPreview(); })
+      el.addEventListener("input",  () => { if(!animReq) recalcPreview() })
     })
-    scaleInput.addEventListener("change", () => { applyScale(); if(!animReq) drawFrame(0) })
-    gridInput.addEventListener("change", () => { if(!animReq) drawFrame(0) })
+    document.getElementById("mode").addEventListener("change", updatePortHelper)
 
-    // Smart UX: changing speed/direction while static flips to scroll
-    function nudgeToScrollIfStatic() {
-      const sel = document.getElementById("displayMode");
-      if (sel.value === "static") {
-        sel.value = "scroll";
-        updateDisplayModeUI();
-        if (!animReq) recalcPreview();
-      }
-    }
-    document.getElementById("speed").addEventListener("input", nudgeToScrollIfStatic);
-    document.getElementById("speed").addEventListener("change", nudgeToScrollIfStatic);
-    document.getElementById("direction").addEventListener("change", nudgeToScrollIfStatic);
+    function nudgeToScrollIfStatic(){ const sel=document.getElementById("displayMode"); if (sel.value==="static"){ sel.value="scroll"; updateDisplayModeUI(); if(!animReq) recalcPreview(); } }
+    document.getElementById("speed").addEventListener("input", nudgeToScrollIfStatic)
+    document.getElementById("speed").addEventListener("change", nudgeToScrollIfStatic)
+    document.getElementById("direction").addEventListener("change", nudgeToScrollIfStatic)
 
-    // Send controls
     document.getElementById("startBtn").addEventListener("click", async () => {
       if(!animReq){ recalcPreview(); animReq = requestAnimationFrame(animatePreview) }
-
       const body = {
         text: document.getElementById("text").value,
         font_path: document.getElementById("fontSelect").value,
@@ -616,43 +438,27 @@
         ddp_channel: parseInt(document.getElementById("ddpChannel").value, 10),
         crisp: !!document.getElementById("crisp").checked,
         display_mode: document.getElementById("displayMode").value,
-        center_short: !!document.getElementById("centerShort").checked
+        center_short: !!document.getElementById("centerShort").checked,
+
+        emoji_baseline_offset: parseInt(document.getElementById("emojiBaseline").value,10) || 0
       }
 
       try {
-        const r = await fetch("/start", {
-          method:"POST",
-          headers: {"Content-Type":"application/json"},
-          body: JSON.stringify(body)
-        })
+        const r = await fetch("/start", { method:"POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) })
         const j = await r.json()
         if(!j.ok){ alert(j.error || "Failed to start"); }
-      } catch (e){
-        alert("Failed to reach server: " + e)
-      }
+      } catch (e){ alert("Failed to reach server: " + e) }
     })
-
-    document.getElementById("stopBtn").addEventListener("click", async () => {
-      try { await fetch("/stop", {method:"POST"}) } catch(e){}
-    })
+    document.getElementById("stopBtn").addEventListener("click", async () => { try { await fetch("/stop",{method:"POST"}) } catch(e){} })
 
     // init
-    updatePortHelper()
-    updateDisplayModeUI()
-    updateColorModeUI()
-
-    // Prefer Arial Unicode if not already selected
-    ;(function ensureArialUnicodeDefault(){
-      const sel = document.getElementById("fontSelect");
-      if (!sel) return;
-      const hasSelected = Array.from(sel.options).some(o => o.selected);
-      if (hasSelected) return;
-      const target = Array.from(sel.options).find(
-        o => (o.getAttribute("data-fontname") || "").toLowerCase().includes("arial unicode")
-      );
+    updatePortHelper(); updateDisplayModeUI(); updateColorModeUI();
+    (function ensureArialUnicodeDefault(){
+      const sel = document.getElementById("fontSelect"); if (!sel) return;
+      const hasSelected = Array.from(sel.options).some(o => o.selected); if (hasSelected) return;
+      const target = Array.from(sel.options).find(o => (o.getAttribute("data-fontname") || "").toLowerCase().includes("arial unicode"));
       if (target) target.selected = true;
     })();
-
     recalcPreview()
   </script>
 </body>
