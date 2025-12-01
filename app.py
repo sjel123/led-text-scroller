@@ -48,6 +48,9 @@ SENDER_THREAD: Optional[threading.Thread] = None
 STOP_EVENT = threading.Event()
 STATE_LOCK = threading.Lock()
 
+# Remember the last config used to start the worker so we can send a blackout frame on stop.
+LAST_CFG: Optional[dict] = None
+
 
 # =========================
 # FONT SCANNING
@@ -374,6 +377,45 @@ def send_ddp_frame(sock: socket.socket, ip: str, port: int, rgb_bytes: bytes, ch
         idx += 1
 
 
+def send_blackout_frame_from_cfg(cfg: Optional[dict]) -> None:
+    """
+    Best-effort blackout: send a single all-black frame using the last
+    known config (mode/ip/port/serpentine/channel).
+    """
+    if not cfg:
+        return
+
+    mode = cfg.get("mode", "ddp")
+    ip = cfg.get("ip", DEFAULT_TARGET_IP)
+    port = int(cfg.get("port", DEFAULT_DDP_PORT if mode == "ddp" else (WLED_UDP_DEFAULT_PORT if mode == "wled_udp" else DEFAULT_SIMPLE_UDP_PORT)))
+    serpentine = bool(cfg.get("serpentine", False))
+    channel = int(cfg.get("ddp_channel", 1))
+
+    width, height = MATRIX_W, MATRIX_H
+    num_pixels = width * height
+    black_frame = bytes([0, 0, 0] * num_pixels)
+
+    payload = remap_serpentine(black_frame, width, height, serpentine)
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
+        if mode == "ddp":
+            send_ddp_frame(sock, ip, port, payload, channel=channel, seq=0)
+        elif mode == "wled_udp":
+            send_wled_realtime_frame(sock, ip, port, payload)
+        else:
+            send_simple_udp_frame(sock, ip, port, payload)
+    except Exception:
+        # Don't crash stop() on blackout failure
+        pass
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
 # =========================
 # WORKER
 # =========================
@@ -569,7 +611,8 @@ def start():
 
     with STATE_LOCK:
         STOP_EVENT.clear()
-        global SENDER_THREAD
+        global SENDER_THREAD, LAST_CFG
+        LAST_CFG = cfg
         SENDER_THREAD = threading.Thread(target=scroller_worker, args=(cfg,), daemon=True)
         SENDER_THREAD.start()
 
@@ -580,14 +623,86 @@ def stop():
     stop_worker()
     return jsonify({"ok": True})
 
+@app.route("/stop-json", methods=["POST"])
+def stop_json():
+    """
+    Alias stop endpoint that also returns simple JSON.
+    Useful for desktop scripts calling /stop-json.
+    """
+    stop_worker()
+    return jsonify({"ok": True, "status": "stopped_and_blackout"})
+
 def stop_worker():
+    global SENDER_THREAD, LAST_CFG
+
+    # Snapshot thread + last cfg under lock
     with STATE_LOCK:
-        global SENDER_THREAD
-        if SENDER_THREAD and SENDER_THREAD.is_alive():
+        thread = SENDER_THREAD
+        cfg = LAST_CFG
+
+        if thread and thread.is_alive():
             STOP_EVENT.set()
-            SENDER_THREAD.join(timeout=2.0)
+            thread.join(timeout=2.0)
+
         STOP_EVENT.clear()
         SENDER_THREAD = None
+
+    # Outside lock: best-effort blackout using last config
+    try:
+        send_blackout_frame_from_cfg(cfg)
+    except Exception:
+        pass
+
+
+@app.route("/daily-quote-start", methods=["POST"])
+def daily_quote_start():
+    """
+    Convenience endpoint:
+    1. Fetch daily quote
+    2. Start LED stream with that quote using sensible defaults
+    """
+
+    # 1) Call your existing daily_quote() view function
+    #    daily_quote() returns a Flask Response, so we call .get_json()
+    resp = daily_quote()
+    data = resp.get_json(silent=True) or {}
+    if not data.get("ok"):
+        return jsonify({"ok": False, "error": data.get("error", "Failed to get daily quote")}), 500
+
+    quote = data["quote"]
+
+    # 2) Build a configuration payload for /start
+    #    Use whatever defaults you like – these should match what your UI normally uses.
+    #    Adjust these fields to match exactly what your /start route expects.
+    payload = {
+        "text": quote,
+        "font_path": "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",  # example
+        "font_size": 16,
+        "color_mode": "solid",
+        "color": [255, 255, 255],      # white
+        "gradient_preset": "rainbow",  # ignored for solid
+        "gradient_reverse": False,
+        "gradient_shift_speed": 0.0,
+        "speed": 15.0,
+        "direction": "left",
+        "serpentine": False,
+        "mode": "ddp",                 # or "wled_udp" / "simple"
+        "ip": "192.168.1.181",         # your default LED IP
+        "port": 4048,                  # DDP port
+        "ddp_channel": 1,
+        "crisp": True,
+        "display_mode": "scroll",
+        "center_short": True,
+        "emoji_baseline_offset": 0,
+    }
+
+    # 3) Call the same logic your /start route uses
+    #    Easiest: call `/start` internally via test_request_context / direct function call.
+    with app.test_request_context("/start", method="POST", json=payload):
+        start_response = start()
+
+    # start_response is a Flask Response – just return it
+    return start_response
 
 
 # =========================

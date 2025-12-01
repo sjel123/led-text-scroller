@@ -398,6 +398,14 @@
             </button>
             <span id="dailyQuoteStatus" class="hint" aria-live="polite"></span>
           </div>
+          <div class="buttons" style="margin-top: 10px">
+            <button id="startBtnMessage" type="button">
+              Start (send)
+            </button>
+            <button id="stopBtnMessage" type="button" class="secondary">
+              Stop
+            </button>
+          </div>
         </div>
 
         <!-- Typography & layout -->
@@ -487,6 +495,14 @@
                 Animate the gradient horizontally across the text.
               </div>
             </div>
+          </div>
+          <div class="buttons" style="margin-top: 10px">
+            <button id="startBtnPresets" type="button">
+              Start (send)
+            </button>
+            <button id="stopBtnPresets" type="button" class="secondary">
+              Stop
+            </button>
           </div>
         </div>
 
@@ -850,8 +866,18 @@
     document.getElementById("speed").addEventListener("change", nudgeToScrollIfStatic)
     document.getElementById("direction").addEventListener("change", nudgeToScrollIfStatic)
 
-    const startButtons = [document.getElementById("startBtn"), previewStartBtn].filter(Boolean)
-    const stopButtons = [document.getElementById("stopBtn"), previewStopBtn].filter(Boolean)
+    const startButtons = [
+      document.getElementById("startBtn"),
+      previewStartBtn,
+      document.getElementById("startBtnMessage"),
+      document.getElementById("startBtnPresets")
+    ].filter(Boolean)
+    const stopButtons = [
+      document.getElementById("stopBtn"),
+      previewStopBtn,
+      document.getElementById("stopBtnMessage"),
+      document.getElementById("stopBtnPresets")
+    ].filter(Boolean)
 
     async function handleStart() {
       if(!animReq){
