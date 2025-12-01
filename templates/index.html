@@ -1,190 +1,580 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>LED Text Scroller (16×64)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root { color-scheme: light dark; }
+    :root {
+      color-scheme: light dark;
+      --bg: #f3f4f6;
+      --bg-alt: #e5e7eb;
+      --card-bg: Canvas;
+      --card-border: #e5e7eb;
+      --card-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+      --text: CanvasText;
+      --muted: #6b7280;
+      --primary: #111827;
+      --primary-soft: #e5e7ff;
+      --accent: #3730a3;
+      --accent-soft: #eef2ff;
+      --secondary: #374151;
+      --radius-xl: 16px;
+      --radius-md: 10px;
+      --spacing: 16px;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
-      margin: 24px; line-height: 1.45;
+      margin: 0;
+      padding: 24px;
+      font-family: var(--font-sans);
+      line-height: 1.45;
+      background:
+        radial-gradient(circle at top left, #e0f2fe 0, transparent 55%),
+        radial-gradient(circle at top right, #e5e7ff 0, transparent 60%),
+        var(--bg);
+      color: var(--text);
     }
-    h1 { margin: 0 0 8px; }
-    .badge { background:#eef2ff; color:#3730a3; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+
+    .page {
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+
+    header.page-header {
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 1.6rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge {
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .subtitle {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .layout-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
     .card {
-      border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; max-width: 980px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.05); background: Canvas; color: CanvasText;
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-xl);
+      padding: 16px;
+      background: var(--card-bg);
+      box-shadow: var(--card-shadow);
     }
-    label { display:block; font-weight:600; margin-top:12px; margin-bottom:6px; }
-    input[type="text"], input[type="number"], input[type="color"], select {
-      width: 100%; padding: 10px; border: 1px solid #e5e7eb; border-radius: 10px; font-size: 14px;
-      background: Field; color: FieldText;
+
+    .card-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 10px;
     }
-    .row { display:flex; gap:12px; flex-wrap:wrap; }
-    .row > div { flex: 1 1 240px; min-width: 220px; }
-    .buttons { display:flex; gap:12px; margin-top:16px; flex-wrap: wrap; }
+
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    .card-subtitle {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .section-label {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 600;
+      color: var(--muted);
+      margin: 16px 0 6px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-top: 10px;
+      margin-bottom: 4px;
+      font-size: 0.86rem;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    input[type="color"],
+    select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      background: Field;
+      color: FieldText;
+    }
+
+    input[type="text"]:focus,
+    input[type="number"]:focus,
+    input[type="color"]:focus,
+    select:focus,
+    button:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(55, 48, 163, 0.4);
+    }
+
+    .row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+
+    .row > div {
+      flex: 1 1 220px;
+      min-width: 200px;
+    }
+
+    .subrow {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 0.78rem;
+      margin-top: 4px;
+    }
+
+    .hint code {
+      font-size: 0.78rem;
+    }
+
+    .preview-shell {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .preview-display {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: center;
+    }
+
+    canvas {
+      image-rendering: pixelated;
+      border-radius: 10px;
+      background: black;
+      border: 1px solid #020617;
+    }
+
+    .preview-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      align-items: center;
+      font-size: 0.8rem;
+    }
+
+    .preview-tools label {
+      margin: 0;
+      font-weight: 600;
+      font-size: 0.8rem;
+    }
+
+    #scale {
+      width: 80px;
+    }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
     button {
-      border: none; border-radius: 12px; padding: 12px 16px; cursor: pointer; font-weight: 700;
-      background: #111827; color: white; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      border: none;
+      border-radius: 999px;
+      padding: 10px 16px;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 0.86rem;
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: transform 0.05s ease, box-shadow 0.1s ease, filter 0.1s ease;
     }
-    button.secondary { background: #374151; }
-    .hint { color: #6b7280; font-size: 13px; margin-top: 6px; }
-    .preview-wrap { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
-    .preview-tools { display:flex; gap:12px; align-items:center; flex-wrap: wrap; }
-    .preview-tools label { margin: 0 6px 0 0; font-weight: 600; }
-    canvas { image-rendering: pixelated; border-radius: 10px; }
-    .subrow { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    .inline { display:flex; align-items:center; gap:8px; }
+
+    button.secondary {
+      background: var(--secondary);
+    }
+
+    button:active {
+      transform: translateY(1px);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    button:hover {
+      filter: brightness(0.97);
+    }
+
+    /* Fine-grained layout tiers for the control card */
+    .control-section {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(249, 250, 251, 0.8);
+      border: 1px solid rgba(209, 213, 219, 0.7);
+      margin-top: 8px;
+    }
+
+    .control-section + .control-section {
+      margin-top: 10px;
+    }
+
+    /* Responsive tweaks */
+    @media (max-width: 900px) {
+      body {
+        padding: 16px;
+      }
+      .card {
+        padding: 14px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      header.page-header {
+        text-align: left;
+      }
+      h1 {
+        flex-wrap: wrap;
+        font-size: 1.4rem;
+      }
+      .preview-shell {
+        flex-direction: column;
+      }
+      .preview-display {
+        align-items: flex-start;
+      }
+    }
   </style>
 </head>
 <body>
-  <h1>LED Text Scroller <span class="badge">16×64</span></h1>
+  <main class="page">
+    <header class="page-header">
+      <h1>
+        LED Text Scroller
+        <span class="badge">16×64</span>
+      </h1>
+      <p class="subtitle">
+        Design and preview scrolling or static text for your 16×64 LED matrix, then stream frames to your target device.
+      </p>
+    </header>
 
-  <!-- Preview -->
-  <div class="card" style="margin-bottom:16px">
-    <h3 style="margin:0 0 12px">Preview (local — no data sent)</h3>
-    <div class="preview-wrap">
-      <canvas id="preview" width="64" height="16" style="background:black"></canvas>
-      <div class="preview-tools">
-        <label for="scale">Scale</label>
-        <input id="scale" type="number" min="4" max="40" value="12" style="width:90px" />
-        <label><input id="grid" type="checkbox" /> Pixel grid</label>
-        <label><input id="crisp" type="checkbox" checked /> Crisp letters</label>
-        <label><input id="centerShort" type="checkbox" /> Center when short (scroll)</label>
-        <button id="previewPlay">Play</button>
-        <button id="previewPause" class="secondary">Pause</button>
-        <button id="previewReset" class="secondary">Reset</button>
-      </div>
-    </div>
-    <div class="hint">Crisp = 1-bit edges. Static display is centered. Gradients & emojis preview accurately.</div>
-  </div>
-
-  <!-- Controls -->
-  <div class="card">
-    <label for="text">Text</label>
-    <input id="text" type="text" placeholder="Type your message..." value="Hello, world! 🌈🚀" />
-
-    <div class="subrow" style="margin-top:8px; align-items:center">
-      <button id="dailyQuoteBtn" class="secondary" type="button">Use daily quote</button>
-      <button id="reloadDailyQuoteBtn" class="secondary" type="button" disabled>Reload daily quote</button>
-      <button id="anotherQuoteBtn" class="secondary" type="button">Another quote</button>
-      <span id="dailyQuoteStatus" class="hint" aria-live="polite"></span>
-    </div>
-
-    <div class="row">
-      <div>
-        <label for="fontSelect">Font (system)</label>
-        <select id="fontSelect">
-          {% for name, path in fonts %}
-          <option
-            value="{{path}}"
-            data-fontname="{{name}}"
-            {% if "Arial Unicode" in name %}selected{% endif %}
-          >{{name}}</option>
-          {% endfor %}
-        </select>
-        <div class="hint">macOS fonts from /System/Library/Fonts, /Library/Fonts, and ~/Library/Fonts.</div>
-      </div>
-      <div>
-        <label for="fontSize">Font size (px)</label>
-        <input id="fontSize" type="number" min="6" max="64" value="16" />
-      </div>
-      <div>
-        <label for="emojiBaseline">Emoji baseline offset (px)</label>
-        <input id="emojiBaseline" type="number" step="1" value="0" />
-        <div class="hint">Positive = move emojis down, Negative = up (only affects lines that contain emoji).</div>
-      </div>
-      <div>
-        <label for="speed">Speed (pixels/sec)</label>
-        <input id="speed" type="number" min="1" max="200" value="15" />
-      </div>
-    </div>
-
-    <div class="row">
-      <div>
-        <label for="colorMode">Color mode</label>
-        <select id="colorMode">
-            <option value="solid" selected>Solid</option>
-          <option value="gradient">Gradient</option>
-        </select>
-      </div>
-      <div id="solidColorBox">
-        <label for="color">Color</label>
-        <input id="color" type="color" value="#ffffff" />
-      </div>
-      <div id="gradientBox" style="display:none">
-        <label for="gradientPreset">Gradient preset</label>
-        <div class="subrow">
-          <select id="gradientPreset">
-            <option value="rainbow" selected>Rainbow (HSV)</option>
-            <option value="fire">Fire</option>
-            <option value="ocean">Ocean</option>
-            <option value="sunset">Sunset</option>
-            <option value="ice">Ice</option>
-          </select>
-          <label class="inline"><input id="gradientReverse" type="checkbox" /> Reverse</label>
-        </div>
-        <div class="subrow">
-          <div style="flex:1 1 260px">
-            <label for="gradientShift">Gradient shift (px/sec)</label>
-            <input id="gradientShift" type="number" step="1" value="0" />
+    <div class="layout-stack">
+      <!-- Preview card -->
+      <section class="card" aria-labelledby="preview-title">
+        <div class="card-header">
+          <div>
+            <h2 id="preview-title" class="card-title">Preview (local only)</h2>
+            <p class="card-subtitle">
+              This preview runs entirely in the browser. No data is sent until you press <strong>Start (send)</strong>.
+            </p>
           </div>
         </div>
-        <div class="hint">Animate the gradient horizontally.</div>
-      </div>
 
-      <div>
-        <label for="displayMode">Display</label>
-        <select id="displayMode">
-          <option value="scroll" selected>Scroll</option>
-          <option value="static">Static (no scroll)</option>
-        </select>
-      </div>
-      <div>
-        <label for="direction">Direction</label>
-        <select id="direction">
-          <option value="left" selected>Left ←</option>
-          <option value="right">Right →</option>
-        </select>
-      </div>
-      <div>
-        <label for="layout">Layouts</label>
-        <select id="layout">
-          <option value="serpentine">Zig-zag (serpentine)</option>
-          <option value="progressive" selected>Progressiv (left→right each row)</option>
-        </select>
-        <div class="hint">Affects send order only (wiring). Preview shows the visual frame.</div>
-      </div>
-      <div>
-        <label for="mode">Output mode</label>
-        <select id="mode">
-          <option value="simple">Simple UDP (7777)</option>
-          <option value="ddp" selected>DDP (4048)</option>
-          <option value="wled_udp">WLED UDP (21324)</option>
-        </select>
-      </div>
-      <div>
-        <label for="ip">Target IP</label>
-        <input id="ip" type="text" value="{{ default_ip or '192.168.1.181' }}" />
-      </div>
-      <div>
-        <label for="port">Port</label>
-        <input id="port" type="number" value="{{ default_ddp_port or 4048 }}" />
-        <div class="hint">Auto-adjusts when you change the mode.</div>
-      </div>
-      <div>
-        <label for="ddpChannel">DDP Channel</label>
-        <input id="ddpChannel" type="number" min="1" max="255" value="1" />
-        <div class="hint">DDP only.</div>
-      </div>
-    </div>
+        <div class="preview-shell">
+          <div class="preview-display">
+            <canvas id="preview" width="64" height="16"></canvas>
+            <div class="hint">
+              Crisp uses 1-bit edges for sharp text. Gradients & emojis are rendered accurately in the preview.
+            </div>
+          </div>
 
-    <div class="buttons">
-      <button id="startBtn">Start (send)</button>
-      <button id="stopBtn" class="secondary">Stop</button>
+          <div class="preview-tools">
+            <label for="scale">Scale</label>
+            <input id="scale" type="number" min="4" max="40" value="12" />
+
+            <label class="inline">
+              <input id="grid" type="checkbox" />
+              Pixel grid
+            </label>
+
+            <label class="inline">
+              <input id="crisp" type="checkbox" checked />
+              Crisp letters
+            </label>
+
+            <label class="inline">
+              <input id="centerShort" type="checkbox" />
+              Center short text (scroll)
+            </label>
+
+            <button id="previewPlay" type="button">Play</button>
+            <button id="previewPause" type="button" class="secondary">Pause</button>
+            <button id="previewReset" type="button" class="secondary">Reset</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Controls card -->
+      <section class="card" aria-labelledby="controls-title">
+        <div class="card-header">
+          <div>
+            <h2 id="controls-title" class="card-title">Message & Output Settings</h2>
+            <p class="card-subtitle">
+              Configure your message, styling, motion, and output target, then send frames to your LED setup.
+            </p>
+          </div>
+        </div>
+
+        <!-- Message & quotes -->
+        <div class="control-section">
+          <div class="section-label">Message</div>
+
+          <label for="text">Text</label>
+          <input
+            id="text"
+            type="text"
+            placeholder="Type your message..."
+            value="Hello, world! 🌈🚀"
+          />
+
+          <div class="subrow" style="margin-top: 6px;">
+            <button id="dailyQuoteBtn" class="secondary" type="button">
+              Use daily quote
+            </button>
+            <button id="reloadDailyQuoteBtn" class="secondary" type="button" disabled>
+              Reload daily quote
+            </button>
+            <button id="anotherQuoteBtn" class="secondary" type="button">
+              Another quote
+            </button>
+            <span id="dailyQuoteStatus" class="hint" aria-live="polite"></span>
+          </div>
+        </div>
+
+        <!-- Typography & layout -->
+        <div class="control-section">
+          <div class="section-label">Typography & Layout</div>
+
+          <div class="row">
+            <div>
+              <label for="fontSelect">Font (system)</label>
+              <select id="fontSelect">
+                {% for name, path in fonts %}
+                <option
+                  value="{{path}}"
+                  data-fontname="{{name}}"
+                  {% if "Arial Unicode" in name %}selected{% endif %}
+                >
+                  {{name}}
+                </option>
+                {% endfor %}
+              </select>
+              <div class="hint">
+                macOS fonts from /System/Library/Fonts, /Library/Fonts, and ~/Library/Fonts.
+              </div>
+            </div>
+
+            <div>
+              <label for="fontSize">Font size (px)</label>
+              <input id="fontSize" type="number" min="6" max="64" value="16" />
+            </div>
+
+            <div>
+              <label for="emojiBaseline">Emoji baseline offset (px)</label>
+              <input id="emojiBaseline" type="number" step="1" value="0" />
+              <div class="hint">
+                Positive moves emoji down, negative moves them up (only lines containing emoji).
+              </div>
+            </div>
+
+            <div>
+              <label for="speed">Speed (pixels/sec)</label>
+              <input id="speed" type="number" min="1" max="200" value="15" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Color & effects -->
+        <div class="control-section">
+          <div class="section-label">Color & Effects</div>
+
+          <div class="row">
+            <div>
+              <label for="colorMode">Color mode</label>
+              <select id="colorMode">
+                <option value="solid" selected>Solid</option>
+                <option value="gradient">Gradient</option>
+              </select>
+            </div>
+
+            <div id="solidColorBox">
+              <label for="color">Color</label>
+              <input id="color" type="color" value="#ffffff" />
+            </div>
+
+            <div id="gradientBox" style="display:none">
+              <label for="gradientPreset">Gradient preset</label>
+              <div class="subrow">
+                <select id="gradientPreset">
+                  <option value="rainbow" selected>Rainbow (HSV)</option>
+                  <option value="fire">Fire</option>
+                  <option value="ocean">Ocean</option>
+                  <option value="sunset">Sunset</option>
+                  <option value="ice">Ice</option>
+                </select>
+                <label class="inline">
+                  <input id="gradientReverse" type="checkbox" />
+                  Reverse
+                </label>
+              </div>
+
+              <div class="subrow">
+                <div style="flex:1 1 260px">
+                  <label for="gradientShift">Gradient shift (px/sec)</label>
+                  <input id="gradientShift" type="number" step="1" value="0" />
+                </div>
+              </div>
+              <div class="hint">
+                Animate the gradient horizontally across the text.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Motion & display -->
+        <div class="control-section">
+          <div class="section-label">Motion & Display</div>
+
+          <div class="row">
+            <div>
+              <label for="displayMode">Display</label>
+              <select id="displayMode">
+                <option value="scroll" selected>Scroll</option>
+                <option value="static">Static (no scroll)</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="direction">Direction</label>
+              <select id="direction">
+                <option value="left" selected>Left ←</option>
+                <option value="right">Right →</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="layout">Layout</label>
+              <select id="layout">
+                <option value="serpentine">Zig-zag (serpentine)</option>
+                <option value="progressive" selected>Progressive (left→right each row)</option>
+              </select>
+              <div class="hint">
+                Affects the send order/wiring only. Preview always shows the visual frame.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Output target -->
+        <div class="control-section">
+          <div class="section-label">Output Target</div>
+
+          <div class="row">
+            <div>
+              <label for="mode">Output mode</label>
+              <select id="mode">
+                <option value="simple">Simple UDP (7777)</option>
+                <option value="ddp" selected>DDP (4048)</option>
+                <option value="wled_udp">WLED UDP (21324)</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="ip">Target IP</label>
+              <input
+                id="ip"
+                type="text"
+                value="{{ default_ip or '192.168.1.181' }}"
+              />
+            </div>
+
+            <div>
+              <label for="port">Port</label>
+              <input
+                id="port"
+                type="number"
+                value="{{ default_ddp_port or 4048 }}"
+              />
+              <div class="hint">
+                This auto-adjusts when you change the output mode.
+              </div>
+            </div>
+
+            <div>
+              <label for="ddpChannel">DDP Channel</label>
+              <input id="ddpChannel" type="number" min="1" max="255" value="1" />
+              <div class="hint">DDP only.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Start / Stop -->
+        <div class="buttons">
+          <button id="startBtn" type="button">
+            Start (send)
+          </button>
+          <button id="stopBtn" type="button" class="secondary">
+            Stop
+          </button>
+        </div>
+      </section>
     </div>
-  </div>
+  </main>
 
   <script>
     const MAT_W = 64, MAT_H = 16;
@@ -413,24 +803,52 @@
     }
 
     // UI bindings
-    document.getElementById("previewPlay").addEventListener("click", () => { if(animReq) return; recalcPreview(); animReq = requestAnimationFrame(animatePreview) })
-    document.getElementById("previewPause").addEventListener("click", () => { if(animReq){ cancelAnimationFrame(animReq); animReq=null } })
-    document.getElementById("previewReset").addEventListener("click", () => { if(animReq){ cancelAnimationFrame(animReq); animReq=null } recalcPreview() })
+    document.getElementById("previewPlay").addEventListener("click", () => {
+      if(animReq) return;
+      recalcPreview();
+      animReq = requestAnimationFrame(animatePreview);
+    })
+    document.getElementById("previewPause").addEventListener("click", () => {
+      if(animReq){
+        cancelAnimationFrame(animReq);
+        animReq=null;
+      }
+    })
+    document.getElementById("previewReset").addEventListener("click", () => {
+      if(animReq){
+        cancelAnimationFrame(animReq);
+        animReq=null;
+      }
+      recalcPreview();
+    })
 
     ;["text","fontSelect","fontSize","speed","direction","crisp","displayMode","centerShort","colorMode","color","gradientPreset","gradientReverse","gradientShift","emojiBaseline"].forEach(id => {
       const el = document.getElementById(id)
-      el.addEventListener("change", () => { if(id==="colorMode") updateColorModeUI(); if(!animReq) recalcPreview(); })
+      el.addEventListener("change", () => {
+        if(id==="colorMode") updateColorModeUI();
+        if(!animReq) recalcPreview();
+      })
       el.addEventListener("input",  () => { if(!animReq) recalcPreview() })
     })
     document.getElementById("mode").addEventListener("change", updatePortHelper)
 
-    function nudgeToScrollIfStatic(){ const sel=document.getElementById("displayMode"); if (sel.value==="static"){ sel.value="scroll"; updateDisplayModeUI(); if(!animReq) recalcPreview(); } }
+    function nudgeToScrollIfStatic(){
+      const sel=document.getElementById("displayMode");
+      if (sel.value==="static"){
+        sel.value="scroll";
+        updateDisplayModeUI();
+        if(!animReq) recalcPreview();
+      }
+    }
     document.getElementById("speed").addEventListener("input", nudgeToScrollIfStatic)
     document.getElementById("speed").addEventListener("change", nudgeToScrollIfStatic)
     document.getElementById("direction").addEventListener("change", nudgeToScrollIfStatic)
 
     document.getElementById("startBtn").addEventListener("click", async () => {
-      if(!animReq){ recalcPreview(); animReq = requestAnimationFrame(animatePreview) }
+      if(!animReq){
+        recalcPreview();
+        animReq = requestAnimationFrame(animatePreview);
+      }
       const body = {
         text: document.getElementById("text").value,
         font_path: document.getElementById("fontSelect").value,
@@ -457,12 +875,21 @@
       }
 
       try {
-        const r = await fetch("/start", { method:"POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) })
+        const r = await fetch("/start", {
+          method:"POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(body)
+        })
         const j = await r.json()
         if(!j.ok){ alert(j.error || "Failed to start"); }
-      } catch (e){ alert("Failed to reach server: " + e) }
+      } catch (e){
+        alert("Failed to reach server: " + e)
+      }
     })
-    document.getElementById("stopBtn").addEventListener("click", async () => { try { await fetch("/stop",{method:"POST"}) } catch(e){} })
+
+    document.getElementById("stopBtn").addEventListener("click", async () => {
+      try { await fetch("/stop",{method:"POST"}) } catch(e){}
+    })
 
     async function requestQuote(variant, loadingText) {
       dailyQuoteStatus.textContent = loadingText
@@ -503,21 +930,26 @@
         textInput.value = lastDailyQuote
         if(!animReq) recalcPreview()
         dailyQuoteStatus.textContent = "Daily quote loaded"
-        setTimeout(() => { if(dailyQuoteStatus.textContent === "Daily quote loaded") dailyQuoteStatus.textContent = "" }, 3000)
+        setTimeout(() => {
+          if(dailyQuoteStatus.textContent === "Daily quote loaded")
+            dailyQuoteStatus.textContent = ""
+        }, 3000)
         return
       }
       requestQuote("", "Fetching daily quote...")
     })
 
     // init
-    updatePortHelper(); updateDisplayModeUI(); updateColorModeUI();
+    updatePortHelper();
+    updateDisplayModeUI();
+    updateColorModeUI();
     (function ensureArialUnicodeDefault(){
       const sel = document.getElementById("fontSelect"); if (!sel) return;
       const hasSelected = Array.from(sel.options).some(o => o.selected); if (hasSelected) return;
       const target = Array.from(sel.options).find(o => (o.getAttribute("data-fontname") || "").toLowerCase().includes("arial unicode"));
       if (target) target.selected = true;
     })();
-    recalcPreview()
+    recalcPreview();
   </script>
 </body>
 </html>
