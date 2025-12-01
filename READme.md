@@ -1,6 +1,6 @@
 ---
 
-## Start & Stop Deployment Server
+## Start and Stop Deployment Server
 
 Below are concise steps to start/stop the **production deployment** using either **Gunicorn** directly or a **launchctl** service on macOS.
 
