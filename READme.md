@@ -92,3 +92,11 @@ Likely causes: wrong paths in the plist, missing venv gunicorn binary, or a busy
 
 - **Open the UI**
   - http://127.0.0.1:5080
+
+---
+
+## Daily Quote Workflow
+
+- Place a valid OpenAI API key in `OPENAI_API_KEY` or `~/Documents/keys/OpenAIAPI.txt` so the generator can fetch fresh ChatGPT quotes (fallback quotes live in `daily_quote_generator.py`).
+- The Flask UI exposes `/daily-quote` for the “Use daily quote” button and `/daily-quote?variant=alternate` for “Another quote,” so you can reload today’s quote or force a new LLM result without leaving the interface.
+- Use the new “Reload daily quote” button after changing fonts, colors, or scroll direction to reapply today’s deterministic quote without making another API call.
