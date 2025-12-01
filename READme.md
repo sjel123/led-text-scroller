@@ -1,4 +1,4 @@
----
+
 
 ## Start and Stop Deployment Server
 
@@ -19,7 +19,7 @@ gunicorn -c gunicorn.conf.py app:app
 **Logs**
 - Shown live in the same terminal session.
 
----
+
 
 ### Option B — Run as a launchctl service (recommended)
 
