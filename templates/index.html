@@ -357,6 +357,10 @@
             <button id="previewReset" type="button" class="secondary">Reset</button>
           </div>
         </div>
+        <div class="buttons" style="margin-top:8px">
+          <button id="previewStartBtn" type="button">Start (send)</button>
+          <button id="previewStopBtn" type="button" class="secondary">Stop</button>
+        </div>
       </section>
 
       <!-- Controls card -->
@@ -454,7 +458,7 @@
 
             <div id="solidColorBox">
               <label for="color">Color</label>
-              <input id="color" type="color" value="#ffffff" />
+              <input id="color" type="color" value="#7ec0ff" />
             </div>
 
             <div id="gradientBox" style="display:none">
@@ -662,6 +666,8 @@
     const previewPlayBtn = document.getElementById("previewPlay")
     const previewPauseBtn = document.getElementById("previewPause")
     const previewResetBtn = document.getElementById("previewReset")
+    const previewStartBtn = document.getElementById("previewStartBtn")
+    const previewStopBtn = document.getElementById("previewStopBtn")
 
     let animReq = null, shift = 0, maxShift = 0, lastTs = 0, gradShift = 0
 
@@ -844,7 +850,10 @@
     document.getElementById("speed").addEventListener("change", nudgeToScrollIfStatic)
     document.getElementById("direction").addEventListener("change", nudgeToScrollIfStatic)
 
-    document.getElementById("startBtn").addEventListener("click", async () => {
+    const startButtons = [document.getElementById("startBtn"), previewStartBtn].filter(Boolean)
+    const stopButtons = [document.getElementById("stopBtn"), previewStopBtn].filter(Boolean)
+
+    async function handleStart() {
       if(!animReq){
         recalcPreview();
         animReq = requestAnimationFrame(animatePreview);
@@ -885,11 +894,14 @@
       } catch (e){
         alert("Failed to reach server: " + e)
       }
-    })
+    }
 
-    document.getElementById("stopBtn").addEventListener("click", async () => {
+    async function handleStop() {
       try { await fetch("/stop",{method:"POST"}) } catch(e){}
-    })
+    }
+
+    startButtons.forEach(btn => btn.addEventListener("click", handleStart))
+    stopButtons.forEach(btn => btn.addEventListener("click", handleStop))
 
     async function requestQuote(variant, loadingText) {
       dailyQuoteStatus.textContent = loadingText
