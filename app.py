@@ -8,6 +8,8 @@ from typing import List, Tuple, Optional
 from flask import Flask, render_template, request, jsonify
 from PIL import Image, ImageDraw, ImageFont
 
+from daily_quote_generator import get_daily_quote, get_fresh_quote
+
 # Optional emoji support
 try:
     from pilmoji import Pilmoji
@@ -34,7 +36,7 @@ DEFAULT_DDP_PORT = 4048
 WLED_UDP_DEFAULT_PORT = 21324
 
 DEV_HOST = "127.0.0.1"
-DEV_PORT = 5050
+DEV_PORT = 5080
 
 
 # =========================
@@ -385,7 +387,7 @@ def scroller_worker(cfg: dict):
     font_size = cfg["font_size"]
     font_path = cfg.get("font_path")
     direction = cfg.get("direction", "left")
-    speed = cfg.get("speed", 40.0)
+    speed = cfg.get("speed", 15.0)
     crisp = bool(cfg.get("crisp", True))
     serpentine = bool(cfg.get("serpentine", False))  # default Progressive
     ip = cfg["ip"]
@@ -499,6 +501,21 @@ def index():
 def healthz():
     return "ok", 200
 
+
+@app.route("/daily-quote")
+def daily_quote():
+    try:
+        variant = request.args.get("variant")
+        if variant == "alternate":
+            quote = get_fresh_quote()
+        else:
+            quote = get_daily_quote()
+    except Exception as exc:
+        app.logger.exception("Failed to generate daily quote")
+        return jsonify({"ok": False, "error": "Failed to generate quote."}), 500
+
+    return jsonify({"ok": True, "quote": quote})
+
 @app.route("/start", methods=["POST"])
 def start():
     payload = request.get_json(silent=True) or {}
@@ -513,7 +530,7 @@ def start():
     gradient_reverse = bool(payload.get("gradient_reverse", False))
     gradient_shift_speed = float(payload.get("gradient_shift_speed", 0.0))
 
-    speed = float(payload.get("speed", 40.0))
+    speed = float(payload.get("speed", 15.0))
     direction = str(payload.get("direction", "left")).lower()
     serpentine = bool(payload.get("serpentine", False))  # default Progressive
     mode = str(payload.get("mode", "ddp")).lower()

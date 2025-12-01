@@ -65,6 +65,13 @@
     <label for="text">Text</label>
     <input id="text" type="text" placeholder="Type your message..." value="Hello, world! 🌈🚀" />
 
+    <div class="subrow" style="margin-top:8px; align-items:center">
+      <button id="dailyQuoteBtn" class="secondary" type="button">Use daily quote</button>
+      <button id="reloadDailyQuoteBtn" class="secondary" type="button" disabled>Reload daily quote</button>
+      <button id="anotherQuoteBtn" class="secondary" type="button">Another quote</button>
+      <span id="dailyQuoteStatus" class="hint" aria-live="polite"></span>
+    </div>
+
     <div class="row">
       <div>
         <label for="fontSelect">Font (system)</label>
@@ -90,7 +97,7 @@
       </div>
       <div>
         <label for="speed">Speed (pixels/sec)</label>
-        <input id="speed" type="number" min="1" max="200" value="40" />
+        <input id="speed" type="number" min="1" max="200" value="15" />
       </div>
     </div>
 
@@ -98,7 +105,7 @@
       <div>
         <label for="colorMode">Color mode</label>
         <select id="colorMode">
-          <option value="solid" selected>Solid</option>
+            <option value="solid" selected>Solid</option>
           <option value="gradient">Gradient</option>
         </select>
       </div>
@@ -247,6 +254,12 @@
     const gridInput = document.getElementById("grid")
     const crispInput = document.getElementById("crisp")
     const centerShortInput = document.getElementById("centerShort")
+    const textInput = document.getElementById("text")
+    const dailyQuoteBtn = document.getElementById("dailyQuoteBtn")
+    const reloadDailyQuoteBtn = document.getElementById("reloadDailyQuoteBtn")
+    const anotherQuoteBtn = document.getElementById("anotherQuoteBtn")
+    const dailyQuoteStatus = document.getElementById("dailyQuoteStatus")
+    let lastDailyQuote = null
 
     const colorModeInput = document.getElementById("colorMode")
     const solidColorInput = document.getElementById("color")
@@ -450,6 +463,51 @@
       } catch (e){ alert("Failed to reach server: " + e) }
     })
     document.getElementById("stopBtn").addEventListener("click", async () => { try { await fetch("/stop",{method:"POST"}) } catch(e){} })
+
+    async function requestQuote(variant, loadingText) {
+      dailyQuoteStatus.textContent = loadingText
+      const btns = [dailyQuoteBtn, anotherQuoteBtn]
+      if(reloadDailyQuoteBtn) btns.push(reloadDailyQuoteBtn)
+      btns.forEach(btn => { if(btn) btn.disabled = true })
+      try {
+        const url = variant ? `/daily-quote?variant=${variant}` : "/daily-quote"
+        const res = await fetch(url)
+        if(!res.ok) throw new Error("Quote service unavailable")
+        const data = await res.json()
+        if(!data.ok) throw new Error(data.error || "Quote service error")
+        textInput.value = data.quote
+        if(!animReq) recalcPreview()
+        if(!variant) {
+          lastDailyQuote = data.quote
+          if(reloadDailyQuoteBtn) reloadDailyQuoteBtn.disabled = false
+        }
+        dailyQuoteStatus.textContent = variant ? "Quote loaded" : "Daily quote loaded"
+      } catch (err) {
+        const message = err && err.message ? err.message : "Failed to load quote"
+        dailyQuoteStatus.textContent = message
+      } finally {
+        btns.forEach(btn => { if(btn) btn.disabled = false })
+        setTimeout(() => {
+          const current = dailyQuoteStatus.textContent
+          if(current === (variant ? "Quote loaded" : "Daily quote loaded") || current === loadingText) {
+            dailyQuoteStatus.textContent = ""
+          }
+        }, 3000)
+      }
+    }
+
+    dailyQuoteBtn.addEventListener("click", () => requestQuote("", "Fetching daily quote..."))
+    anotherQuoteBtn.addEventListener("click", () => requestQuote("alternate", "Fetching alternate quote..."))
+    reloadDailyQuoteBtn.addEventListener("click", () => {
+      if(lastDailyQuote) {
+        textInput.value = lastDailyQuote
+        if(!animReq) recalcPreview()
+        dailyQuoteStatus.textContent = "Daily quote loaded"
+        setTimeout(() => { if(dailyQuoteStatus.textContent === "Daily quote loaded") dailyQuoteStatus.textContent = "" }, 3000)
+        return
+      }
+      requestQuote("", "Fetching daily quote...")
+    })
 
     // init
     updatePortHelper(); updateDisplayModeUI(); updateColorModeUI();
